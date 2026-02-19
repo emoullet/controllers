@@ -1,0 +1,79 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    qontrol_explorer:
+      type: qontrol_controller/QontrolVelocityController
+      auto_start: false
+      is_chainable: true
+      
+    fractional_teleoperation_controller:
+      type: fractional_teleoperation/FractionalTeleoperationController
+
+qontrol_explorer:
+  ros__parameters:
+    # Base parameters
+    robot_description_origin: robot_state_publisher
+    tip_frame: ft_frame
+    root_frame: base_link
+    state_interface:
+      - position
+      - velocity
+      - effort
+    robot_command: position
+
+    # Velocity parameters
+    command_max_linear_velocity: 0.05
+    command_max_angular_velocity: 1.0
+    refresh_mapping: True
+    open_loop: True
+    input_topic_name: /fractional_teleoperation_controller/velocity_command
+    regularisation_weight: 1e-2
+    root_frame_control: True
+    deadzone: 0.1
+    velocity_limit: 0.5
+    horizon: 15
+    p_gain: 100.0
+    lambda: 0.1
+    points_collision: [0.0, -0.6, 0.0, 0.0, -0.6, 1.0]
+    wall_constraint_horizon: 15
+    d_secure: 0.2
+    d_prevent: 0.2
+    elbow_frame: "link_3"
+    handle_frame: "link_5"
+
+fractional_teleoperation_controller:
+  ros__parameters:
+    # Fractional-order parameters
+    alpha: 1.5                    # Fractional order (0 < alpha < 2)
+    gain_K: 0.1                   # Gain in fractional law D^alpha x_d = K u
+    memory_length: 100            # Number of past samples for GL approximation
+    dt: 0.01                       # Time step in seconds (should match update_rate)
+    velocity_scale: 1.0           # Overall velocity scaling factor
+    input_frame: "base"
+    
+    # Robot interface configuration for explorer
+    robot_type: "explorer_velocity"
+    base_frame: "base_link"
+    tool_frame: "tool0"
+    command_names:
+      - "qontrol_explorer/linear_x"
+      - "qontrol_explorer/linear_y"
+      - "qontrol_explorer/linear_z"
+      - "qontrol_explorer/angular_x"
+      - "qontrol_explorer/angular_y"
+      - "qontrol_explorer/angular_z"
+    
+    # Marker visualization
+    enable_marker_visualization: true
+    vel_cmd_marker_topic: "/vel_cmd_marker"
+    vel_cmd_marker_frame_id: "base_link"
+    vel_cmd_marker_scale_x: 0.03
+    vel_cmd_marker_scale_y: 0.07
+    vel_cmd_marker_scale_z: 0.07
+    
+    # Dynamic alpha parameters
+    use_dynamic_alpha: false
+    alpha_max: 1.0
+    l_0: 0.1
+    l_max: 1.0
