@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fractional_teleoperation</name>
+  <version>0.0.0</version>
+  <description>Fractional-order teleoperation controller for robotic arm in Cartesian space using Grünwald-Letnikov discrete approximation</description>
+  <maintainer email="emoullet@todo.todo">emoullet</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>controller_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>robot_interfaces</depend>
+  <depend>extender_msgs</depend>
+  <depend>eigen</depend>
+
+  <exec_depend>hand_joystick_interfaces</exec_depend>
+  <exec_depend>mediapipe_mocap</exec_depend>
+  <exec_depend>offline_media_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <pluginlib plugin="${prefix}/fractional_teleoperation_controller.xml"/>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

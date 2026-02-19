@@ -1,0 +1,48 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    fractional_teleoperation_controller:
+      type: fractional_teleoperation/FractionalTeleoperationController
+
+fractional_teleoperation_controller:
+  ros__parameters:
+    # Fractional-order parameters
+    alpha: 1.5                    # Fractional order (0 < alpha < 2)
+                                   # alpha ~ 1.0: near-standard integration
+                                   # alpha < 1.0: more damping, smoother
+                                   # alpha > 1.0: less damping, more responsive
+    
+    gain_K: 0.1                   # Gain in fractional law D^alpha x_d = K u
+    
+    memory_length: 100            # Number of past samples for GL approximation
+    
+    dt: 0.01                      # Time step in seconds (should match update_rate)
+    
+    velocity_scale: 1.0           # Overall velocity scaling factor
+    
+    # Input frame: "base" or "ee"
+    input_frame: "base"
+    
+    # Robot interface configuration
+    robot_type: "franka_velocity"
+    
+    base_frame: "panda_link0"
+    tool_frame: "panda_link8"
+    
+    # Command interface names (robot-specific)
+    command_names: []
+    
+    # Dynamic alpha parameters
+    use_dynamic_alpha: false         # Enable dynamic alpha adjustment based on joystick norm
+    
+    # When dynamic alpha is enabled:
+    alpha_max: 1.0                   # Maximum alpha value
+    l_0: 0.1                         # Lower threshold for joystick norm lambda
+    l_max: 1.0                       # Upper threshold for joystick norm lambda
+    
+    # Behavior with dynamic alpha:
+    # - alpha = 0         when lambda < l_0
+    # - alpha = α_max * (lambda - l_0) / (l_max - l_0)  when l_0 <= lambda <= l_max
+    # - alpha = α_max     when lambda > l_max
+

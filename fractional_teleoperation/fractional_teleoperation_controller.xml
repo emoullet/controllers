@@ -1,0 +1,5 @@
+<library path="fractional_teleoperation">
+  <class name="fractional_teleoperation/FractionalTeleoperationController" type="fractional_teleoperation_controller::FractionalTeleoperationController" base_class_type="controller_interface::ControllerInterface">
+    <description>Fractional-order teleoperation controller for robotic arms</description>
+  </class>
+</library>

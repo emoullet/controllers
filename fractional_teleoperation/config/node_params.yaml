@@ -1,0 +1,32 @@
+fractional_teleoperation_node:
+  ros__parameters:
+    # Fractional-order parameters
+    alpha: 1.                   # Fractional order (0 < alpha < 2)
+    gain_K: 1.                 # Gain in fractional law D^alpha x_d = K u
+    memory_length: 50            # Number of past samples for GL approximation
+    dt: 0.01                      # Time step in seconds (100 Hz update rate)
+    velocity_scale: 1.0           # Overall velocity scaling factor
+    input_frame: "base"           # Reference frame: "base" or "ee"
+    adapt_gain_to_alpha: true     # Adapt K to alpha using K = v_max * dt^(1-alpha)
+    adaptive_gain_mode: "perceptual"      # "dt" or "perceptual"
+    v_max: 2.0                    # Max velocity used for adaptive K (m/s)
+    t_ref: 0.2                    # Reference time for perceptual gain mode (s)
+    
+    # Output topic configuration
+    vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands
+    
+    # Marker visualization
+    enable_marker_visualization: true
+    vel_cmd_marker_topic: "/vel_cmd_marker"
+    vel_cmd_marker_frame_id: "base_link"
+    vel_cmd_marker_scale_x: 0.03
+    vel_cmd_marker_scale_y: 0.07
+    vel_cmd_marker_scale_z: 0.07
+    desired_position_marker_topic: "/desired_position_marker"
+    desired_position_marker_scale: 0.07
+    
+    # Dynamic alpha parameters
+    use_dynamic_alpha: false
+    alpha_max: 1.0
+    l_0: 0.1
+    l_max: 1.0
