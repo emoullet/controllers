@@ -230,7 +230,9 @@ namespace fractional_teleoperation_node
     mode_ = msg->mode;
   }
 
-  void FractionalTeleoperationNode::publishMarker(const geometry_msgs::msg::Twist &vel_cmd)
+  void FractionalTeleoperationNode::publishMarker(
+      const geometry_msgs::msg::Twist &vel_cmd,
+      const Eigen::Vector3d &desired_position)
   {
     if (!enable_marker_visualization_ || !vel_cmd_marker_pub_) {
       return;
@@ -253,12 +255,12 @@ namespace fractional_teleoperation_node
     
     geometry_msgs::msg::Point start;
     geometry_msgs::msg::Point end;
-    start.x = 0.0;
-    start.y = 0.0;
-    start.z = 0.0;
-    end.x = vel_cmd.linear.x;
-    end.y = vel_cmd.linear.y;
-    end.z = vel_cmd.linear.z;
+    start.x = desired_position.x();
+    start.y = desired_position.y();
+    start.z = desired_position.z();
+    end.x = start.x + vel_cmd.linear.x;
+    end.y = start.y + vel_cmd.linear.y;
+    end.z = start.z + vel_cmd.linear.z;
     
     marker_msg.points = {start, end};
     vel_cmd_marker_pub_->publish(marker_msg);
@@ -379,7 +381,7 @@ namespace fractional_teleoperation_node
 
     // Publish marker visualization for velocity command
     if (enable_marker_visualization_) {
-      publishMarker(vel_cmd);
+      publishMarker(vel_cmd, desired_position_linear_);
     }
   }
 

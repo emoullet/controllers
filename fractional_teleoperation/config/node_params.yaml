@@ -1,13 +1,13 @@
 fractional_teleoperation_node:
   ros__parameters:
     # Fractional-order parameters
-    alpha: 1.                   # Fractional order (0 < alpha < 2)
+    alpha: 0.5                   # Fractional order (0 < alpha < 2)
     gain_K: 1.                 # Gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
     velocity_scale: 1.0           # Overall velocity scaling factor
     input_frame: "base"           # Reference frame: "base" or "ee"
-    adapt_gain_to_alpha: true     # Adapt K to alpha using K = v_max * dt^(1-alpha)
+    adapt_gain_to_alpha: false     # Adapt K to alpha using K = v_max * dt^(1-alpha)
     adaptive_gain_mode: "perceptual"      # "dt" or "perceptual"
     v_max: 2.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
