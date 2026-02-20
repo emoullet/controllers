@@ -27,7 +27,9 @@ namespace fractional_teleoperation_node
 
     void updateGainK();
     
-    void publishMarker(const geometry_msgs::msg::Twist &vel_cmd);
+    void publishMarker(
+      const geometry_msgs::msg::Twist &vel_cmd,
+      const Eigen::Vector3d &desired_position);
     void publishDesiredPositionMarker(const Eigen::Vector3d &desired_position);
     void controlUpdate();
 

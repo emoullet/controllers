@@ -158,6 +158,16 @@ ros2 launch fractional_teleoperation test_video_2d_hand_joystick_simple_launch.p
   folder_path:=/absolute/path/to/videos
 ```
 
+2D launch with optional RGB+depth fusion in `hand_landmarks_node`:
+
+```bash
+ros2 launch fractional_teleoperation test_video_2d_hand_joystick_simple_launch.py \
+  folder_path:=/absolute/path/to/videos \
+  use_depth:=true \
+  depth_topic:=/camera/aligned_depth_to_color/image_raw \
+  camera_info_topic:=/camera/color/camera_info
+```
+
 3D/depth video + hand joystick + fractional controller:
 
 ```bash
@@ -174,6 +184,12 @@ gui:=true
 fps:=30
 controller_config:=/absolute/path/to/config.yaml
 hand_joystick_config:=/absolute/path/to/joystick_config.yaml
+use_depth:=true
+depth_topic:=/camera/aligned_depth_to_color/image_raw
+camera_info_topic:=/camera/color/camera_info
+depth_time_tolerance_ms:=10.0
+depth_min_m:=0.05
+depth_max_m:=2.0
 ```
 
 ## Dependencies
