@@ -37,7 +37,7 @@ double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha
 }
 
 Eigen::Vector3d applyFractionalIntegration(
-    const Eigen::Vector3d & input_velocity,
+    const Eigen::Vector3d & joystick_input,
     std::deque<Eigen::Vector3d> & history,
     const std::vector<double> & gl_coefficients,
     int memory_length,
@@ -54,7 +54,7 @@ Eigen::Vector3d applyFractionalIntegration(
   }
 
   const double dt_alpha = std::pow(dt, alpha);
-  const Eigen::Vector3d integrated_value = dt_alpha * gain_K * input_velocity - sum;
+  const Eigen::Vector3d integrated_value = dt_alpha * gain_K * joystick_input - sum;
 
   history.push_front(integrated_value);
   if (history.size() > static_cast<size_t>(memory_length))
@@ -71,6 +71,40 @@ Eigen::Vector3d computeVelocityFromDesiredPosition(
     double dt)
 {
   return (desired_position - previous_desired_position) / dt;
+}
+
+Eigen::Vector3d updateReferencePosition(
+    const Eigen::Vector3d & current_reference,
+    const Eigen::Vector3d & target_position,
+    double shift_rate,
+    double dt)
+{
+  const double clamped_shift_rate = std::max(0.0, shift_rate);
+  const double blend = std::clamp(clamped_shift_rate * dt, 0.0, 1.0);
+  return current_reference + blend * (target_position - current_reference);
+}
+
+Eigen::Vector3d updateReferencePositionFractional(
+    const Eigen::Vector3d & current_reference,
+    const Eigen::Vector3d & target_position,
+    std::deque<Eigen::Vector3d> & history,
+    const std::vector<double> & gl_coefficients,
+    int memory_length,
+    double dt,
+    double alpha,
+    double gain_K)
+{
+  const Eigen::Vector3d reference_error = target_position - current_reference;
+  const Eigen::Vector3d fractional_step = applyFractionalIntegration(
+      reference_error,
+      history,
+      gl_coefficients,
+      memory_length,
+      dt,
+      alpha,
+      gain_K);
+
+  return current_reference + dt * fractional_step;
 }
 
 double computeAdaptiveGainK(

@@ -27,6 +27,22 @@ Eigen::Vector3d computeVelocityFromDesiredPosition(
     const Eigen::Vector3d & previous_desired_position,
     double dt);
 
+Eigen::Vector3d updateReferencePosition(
+    const Eigen::Vector3d & current_reference,
+    const Eigen::Vector3d & target_position,
+    double shift_rate,
+    double dt);
+
+Eigen::Vector3d updateReferencePositionFractional(
+    const Eigen::Vector3d & current_reference,
+    const Eigen::Vector3d & target_position,
+    std::deque<Eigen::Vector3d> & history,
+    const std::vector<double> & gl_coefficients,
+    int memory_length,
+    double dt,
+    double alpha,
+    double gain_K);
+
 double computeAdaptiveGainK(
     double current_alpha,
     double v_max,

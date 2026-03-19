@@ -1,7 +1,7 @@
 fractional_teleoperation_node:
   ros__parameters:
     # Fractional-order parameters
-    alpha: 0.5                   # Fractional order (0 < alpha < 2)
+    alpha: 0.                   # Fractional order (0 < alpha < 2)
     gain_K: 1.                 # Gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
@@ -9,7 +9,7 @@ fractional_teleoperation_node:
     input_frame: "base"           # Reference frame: "base" or "ee"
     adapt_gain_to_alpha: false     # Adapt K to alpha using K = v_max * dt^(1-alpha)
     adaptive_gain_mode: "perceptual"      # "dt" or "perceptual"
-    v_max: 2.0                    # Max velocity used for adaptive K (m/s)
+    v_max: 1.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
     
     # Output topic configuration
@@ -24,9 +24,19 @@ fractional_teleoperation_node:
     vel_cmd_marker_scale_z: 0.07
     desired_position_marker_topic: "/desired_position_marker"
     desired_position_marker_scale: 0.07
+    reference_position_marker_topic: "/reference_position_marker"
+    reference_position_marker_scale: 0.07
+    joystick_linear_marker_topic: "/joystick_linear_marker"
     
     # Dynamic alpha parameters
     use_dynamic_alpha: false
     alpha_max: 1.0
     l_0: 0.1
     l_max: 1.0
+
+    # Desired position is expressed as (x_des - x_ref), with slow drift of x_ref
+    use_reference_drift: true
+    reference_drift_rate: 0.5
+    reference_update_mode: "fractional"   # "first_order" or "fractional"
+    reference_alpha: 0.5                    # Used when reference_update_mode="fractional"
+    reference_fractional_gain: 0.5           # Gain K in fractional update of reference position

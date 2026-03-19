@@ -137,6 +137,17 @@ Standalone node test launch:
 ros2 launch fractional_teleoperation test_fractional_teleoperation_node.launch.py
 ```
 
+Live hand pipeline test launch (rosbridge + compressed image republish + hand landmarks + hand joystick + fractional teleop):
+
+Open and refresh atb each launch the file 
+```
+camera.html
+```
+
+```bash
+ros2 launch fractional_teleoperation test_fractional_teleoperation_node_hand_live.launch.py
+```
+
 2D video + hand joystick + fractional controller (test robot):
 
 ```bash
@@ -190,6 +201,31 @@ camera_info_topic:=/camera/color/camera_info
 depth_time_tolerance_ms:=10.0
 depth_min_m:=0.05
 depth_max_m:=2.0
+```
+
+## Offline Fractional Behavior Visualization
+
+You can generate comparison plots for multiple `alpha` values without running ROS nodes.
+The script simulates two joystick scenarios and saves figures in `fig/` by default:
+
+- Circle input in the joystick plane with configurable radius (`0..1`) and linear velocity
+- Step input along x from `0` to `step_size` (`0..1`)
+
+Run from the workspace root:
+
+```bash
+python3 src/controllers/fractional_teleoperation/scripts/visualize_fractional_teleoperation.py \
+  --alphas 0.2 0.5 0.8 1.0 \
+  --circle-radius 0.6 \
+  --circle-velocity 0.8 \
+  --step-size 0.8
+```
+
+Optional output directory:
+
+```bash
+python3 src/controllers/fractional_teleoperation/scripts/visualize_fractional_teleoperation.py \
+  --output-dir src/controllers/fractional_teleoperation/fig
 ```
 
 ## Dependencies
