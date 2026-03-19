@@ -22,6 +22,8 @@ def generate_launch_description():
     can_port = LaunchConfiguration("can_port")
     host_id = LaunchConfiguration("host_id")
     use_poc2 = LaunchConfiguration("use_POC2")
+    render_engine = LaunchConfiguration("render_engine")
+    software_rendering = LaunchConfiguration("software_rendering")
 
     declared_arguments = [
         DeclareLaunchArgument(
@@ -29,8 +31,11 @@ def generate_launch_description():
             default_value="true", 
             description="Start RViz2 automatically with this launch file."
         ),
-        DeclareLaunchArgument(
-            'use_sim_time', 
+        DeclareLaunchArgument(            "use_simulation",
+            default_value="false",
+            description="Launch simulation stack instead of hardware stack"
+        ),
+        DeclareLaunchArgument(            'use_sim_time', 
             default_value='false', 
             description='If true, use simulated clock'
         ),
@@ -58,6 +63,16 @@ def generate_launch_description():
             'spacenav', 
             default_value='True', 
             description='If the spacenav 3D mouse is used'
+        ),
+        DeclareLaunchArgument(
+            'render_engine',
+            default_value='ogre',
+            description='Gazebo render engine (ogre or ogre2)'
+        ),
+        DeclareLaunchArgument(
+            'software_rendering',
+            default_value='true',
+            description='Force software OpenGL rendering for Gazebo GUI'
         )
     ]
 
@@ -88,7 +103,9 @@ def generate_launch_description():
             'gui': gui,
             'use_sim_time': use_sim_time,
             'rviz_delay': '0.0',
-            'extra_controllers_config': velocity_config
+            'extra_controllers_config': velocity_config,
+            'render_engine': render_engine,
+            'software_rendering': software_rendering,
         }.items(),
         condition=IfCondition(use_simulation)
     )
