@@ -31,6 +31,10 @@ namespace fractional_teleoperation_node
       const geometry_msgs::msg::Twist &vel_cmd,
       const Eigen::Vector3d &desired_position);
     void publishDesiredPositionMarker(const Eigen::Vector3d &desired_position);
+    void publishReferencePositionMarker(const Eigen::Vector3d &reference_position);
+    void publishJoystickLinearMarker(
+      const Eigen::Vector3d &joystick_linear,
+      const Eigen::Vector3d &reference_position);
     void controlUpdate();
 
     // Parameters
@@ -44,6 +48,11 @@ namespace fractional_teleoperation_node
     std::string adaptive_gain_mode_;
     double v_max_;
     double t_ref_;
+    bool use_reference_drift_;
+    double reference_drift_rate_;
+    std::string reference_update_mode_;
+    double reference_alpha_;
+    double reference_fractional_gain_;
     
     // Dynamic alpha parameters
     bool use_dynamic_alpha_;
@@ -61,28 +70,38 @@ namespace fractional_teleoperation_node
     double marker_scale_z_;
     std::string desired_position_marker_topic_;
     double desired_position_marker_scale_;
+    std::string reference_position_marker_topic_;
+    double reference_position_marker_scale_;
+    std::string joystick_linear_marker_topic_;
 
     // Subscribers and Publishers
     rclcpp::Subscription<extender_msgs::msg::TeleopCommand>::SharedPtr joystick_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_cmd_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vel_cmd_marker_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr desired_position_marker_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr reference_position_marker_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joystick_linear_marker_pub_;
     rclcpp::TimerBase::SharedPtr update_timer_;
 
     // State
     geometry_msgs::msg::Twist latest_joystick_;
     extender_msgs::msg::TeleopCommand::_mode_type mode_;
-    Eigen::Vector3d desired_position_linear_;
-    Eigen::Vector3d desired_position_angular_;
+    Eigen::Vector3d fractional_offset_linear_;
+    Eigen::Vector3d fractional_offset_angular_;
+    Eigen::Vector3d reference_position_linear_;
+    Eigen::Vector3d reference_position_angular_;
     Eigen::Quaterniond current_orientation_;
     double current_alpha_;
 
     // Grünwald-Letnikov coefficients
     std::vector<double> gl_coefficients_;
+    std::vector<double> reference_gl_coefficients_;
     
     // History buffers for fractional integration
     std::deque<Eigen::Vector3d> linear_history_;
     std::deque<Eigen::Vector3d> angular_history_;
+    std::deque<Eigen::Vector3d> reference_linear_history_;
+    std::deque<Eigen::Vector3d> reference_angular_history_;
   };
 
 } // namespace fractional_teleoperation_node

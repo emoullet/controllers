@@ -2,6 +2,7 @@
 #include "fractional_teleoperation/fractional_teleoperation_core.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace fractional_teleoperation_node
 {
@@ -9,8 +10,10 @@ namespace fractional_teleoperation_node
       const rclcpp::NodeOptions & options)
       : rclcpp::Node("fractional_teleoperation_node", options),
         latest_joystick_(),
-        desired_position_linear_(Eigen::Vector3d::Zero()),
-        desired_position_angular_(Eigen::Vector3d::Zero()),
+        fractional_offset_linear_(Eigen::Vector3d::Zero()),
+        fractional_offset_angular_(Eigen::Vector3d::Zero()),
+        reference_position_linear_(Eigen::Vector3d::Zero()),
+        reference_position_angular_(Eigen::Vector3d::Zero()),
         current_orientation_(Eigen::Quaterniond::Identity()),
         current_alpha_(1.5)
   {
@@ -80,6 +83,17 @@ namespace fractional_teleoperation_node
     RCLCPP_INFO(get_logger(), "  velocity_scale: %.4f", velocity_scale_);
     RCLCPP_INFO(get_logger(), "  input_frame: %s", input_frame_.c_str());
     RCLCPP_INFO(get_logger(), "  adapt_gain_to_alpha: %s", adapt_gain_to_alpha_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "  use_reference_drift: %s", use_reference_drift_ ? "true" : "false");
+    if (use_reference_drift_)
+    {
+      RCLCPP_INFO(get_logger(), "  reference_drift_rate: %.4f 1/s", reference_drift_rate_);
+      RCLCPP_INFO(get_logger(), "  reference_update_mode: %s", reference_update_mode_.c_str());
+      if (reference_update_mode_ == "fractional")
+      {
+        RCLCPP_INFO(get_logger(), "  reference_alpha: %.4f", reference_alpha_);
+        RCLCPP_INFO(get_logger(), "  reference_fractional_gain: %.4f", reference_fractional_gain_);
+      }
+    }
     if (adapt_gain_to_alpha_)
     {
       RCLCPP_INFO(get_logger(), "  adaptive_gain_mode: %s", adaptive_gain_mode_.c_str());
@@ -102,10 +116,14 @@ namespace fractional_teleoperation_node
     // Compute Grünwald-Letnikov coefficients
     gl_coefficients_ = fractional_teleoperation::core::computeGrunwaldCoefficients(
       memory_length_, current_alpha_);
+    reference_gl_coefficients_ = fractional_teleoperation::core::computeGrunwaldCoefficients(
+      memory_length_, reference_alpha_);
 
     // Initialize history buffers
     linear_history_.clear();
     angular_history_.clear();
+    reference_linear_history_.clear();
+    reference_angular_history_.clear();
 
     // Create update timer (runs at 1/dt frequency)
     auto update_period = std::chrono::milliseconds(static_cast<long>(dt_ * 1000));
@@ -136,10 +154,18 @@ namespace fractional_teleoperation_node
     declare_parameter("vel_cmd_marker_scale_z", 0.07);
     declare_parameter("desired_position_marker_topic", std::string("/desired_position_marker"));
     declare_parameter("desired_position_marker_scale", 0.04);
+    declare_parameter("reference_position_marker_topic", std::string("/reference_position_marker"));
+    declare_parameter("reference_position_marker_scale", 0.04);
+    declare_parameter("joystick_linear_marker_topic", std::string("/joystick_linear_marker"));
     declare_parameter("use_dynamic_alpha", false);
     declare_parameter("alpha_max", 1.0);
     declare_parameter("l_0", 0.1);
     declare_parameter("l_max", 1.0);
+    declare_parameter("use_reference_drift", true);
+    declare_parameter("reference_drift_rate", 0.15);
+    declare_parameter("reference_update_mode", std::string("first_order"));
+    declare_parameter("reference_alpha", 0.8);
+    declare_parameter("reference_fractional_gain", 0.15);
     declare_parameter("vel_cmd_topic", std::string("/vel_cmd"));
 
     alpha_ = get_parameter("alpha").as_double();
@@ -160,10 +186,59 @@ namespace fractional_teleoperation_node
     marker_scale_z_ = get_parameter("vel_cmd_marker_scale_z").as_double();
     desired_position_marker_topic_ = get_parameter("desired_position_marker_topic").as_string();
     desired_position_marker_scale_ = get_parameter("desired_position_marker_scale").as_double();
+    reference_position_marker_topic_ = get_parameter("reference_position_marker_topic").as_string();
+    reference_position_marker_scale_ = get_parameter("reference_position_marker_scale").as_double();
+    joystick_linear_marker_topic_ = get_parameter("joystick_linear_marker_topic").as_string();
     use_dynamic_alpha_ = get_parameter("use_dynamic_alpha").as_bool();
     alpha_max_ = get_parameter("alpha_max").as_double();
     l_0_ = get_parameter("l_0").as_double();
     l_max_ = get_parameter("l_max").as_double();
+    use_reference_drift_ = get_parameter("use_reference_drift").as_bool();
+    reference_drift_rate_ = get_parameter("reference_drift_rate").as_double();
+    reference_update_mode_ = get_parameter("reference_update_mode").as_string();
+    reference_alpha_ = get_parameter("reference_alpha").as_double();
+    reference_fractional_gain_ = get_parameter("reference_fractional_gain").as_double();
+
+    if (reference_drift_rate_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "reference_drift_rate must be >= 0. Received %.4f, clamping to 0.",
+          reference_drift_rate_);
+      reference_drift_rate_ = 0.0;
+    }
+
+    std::transform(
+        reference_update_mode_.begin(),
+        reference_update_mode_.end(),
+        reference_update_mode_.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (reference_update_mode_ != "first_order" && reference_update_mode_ != "fractional")
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "Invalid reference_update_mode '%s'. Use 'first_order' or 'fractional'. Defaulting to 'first_order'.",
+          reference_update_mode_.c_str());
+      reference_update_mode_ = "first_order";
+    }
+
+    if (reference_alpha_ <= 0.0 || reference_alpha_ >= 2.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "Invalid reference_alpha=%.3f. Must be in (0, 2). Clamping to [0.1, 1.9].",
+          reference_alpha_);
+      reference_alpha_ = std::clamp(reference_alpha_, 0.1, 1.9);
+    }
+
+    if (reference_fractional_gain_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "reference_fractional_gain must be >= 0. Received %.4f, clamping to 0.",
+          reference_fractional_gain_);
+      reference_fractional_gain_ = 0.0;
+    }
 
     // Initialize current_alpha_ based on use_dynamic_alpha
     if (use_dynamic_alpha_)
@@ -199,6 +274,16 @@ namespace fractional_teleoperation_node
           create_publisher<visualization_msgs::msg::Marker>(desired_position_marker_topic_, 10);
       RCLCPP_INFO(get_logger(), "Publishing desired position marker on topic: %s",
                   desired_position_marker_topic_.c_str());
+
+        reference_position_marker_pub_ =
+          create_publisher<visualization_msgs::msg::Marker>(reference_position_marker_topic_, 10);
+        RCLCPP_INFO(get_logger(), "Publishing reference position marker on topic: %s",
+              reference_position_marker_topic_.c_str());
+
+      joystick_linear_marker_pub_ =
+          create_publisher<visualization_msgs::msg::Marker>(joystick_linear_marker_topic_, 10);
+      RCLCPP_INFO(get_logger(), "Publishing joystick linear marker on topic: %s",
+                  joystick_linear_marker_topic_.c_str());
     }
   }
 
@@ -295,6 +380,71 @@ namespace fractional_teleoperation_node
     desired_position_marker_pub_->publish(marker_msg);
   }
 
+  void FractionalTeleoperationNode::publishReferencePositionMarker(
+      const Eigen::Vector3d &reference_position)
+  {
+    if (!enable_marker_visualization_ || !reference_position_marker_pub_) {
+      return;
+    }
+
+    visualization_msgs::msg::Marker marker_msg;
+    marker_msg.header.stamp = now();
+    marker_msg.header.frame_id = marker_frame_id_;
+    marker_msg.ns = "reference_position";
+    marker_msg.id = 0;
+    marker_msg.type = visualization_msgs::msg::Marker::SPHERE;
+    marker_msg.action = visualization_msgs::msg::Marker::ADD;
+    marker_msg.scale.x = reference_position_marker_scale_;
+    marker_msg.scale.y = reference_position_marker_scale_;
+    marker_msg.scale.z = reference_position_marker_scale_;
+    marker_msg.color.a = 1.0;
+    marker_msg.color.r = 1.0;
+    marker_msg.color.g = 0.5;
+    marker_msg.color.b = 0.0;
+    marker_msg.pose.position.x = reference_position.x();
+    marker_msg.pose.position.y = reference_position.y();
+    marker_msg.pose.position.z = reference_position.z();
+    marker_msg.pose.orientation.w = 1.0;
+
+    reference_position_marker_pub_->publish(marker_msg);
+  }
+
+  void FractionalTeleoperationNode::publishJoystickLinearMarker(
+      const Eigen::Vector3d &joystick_linear,
+      const Eigen::Vector3d &reference_position)
+  {
+    if (!enable_marker_visualization_ || !joystick_linear_marker_pub_) {
+      return;
+    }
+
+    visualization_msgs::msg::Marker marker_msg;
+    marker_msg.header.stamp = now();
+    marker_msg.header.frame_id = marker_frame_id_;
+    marker_msg.ns = "joystick_linear";
+    marker_msg.id = 0;
+    marker_msg.type = visualization_msgs::msg::Marker::ARROW;
+    marker_msg.action = visualization_msgs::msg::Marker::ADD;
+    marker_msg.scale.x = marker_scale_x_;
+    marker_msg.scale.y = marker_scale_y_;
+    marker_msg.scale.z = marker_scale_z_;
+    marker_msg.color.a = 1.0;
+    marker_msg.color.r = 1.0;
+    marker_msg.color.g = 1.0;
+    marker_msg.color.b = 0.0;
+
+    geometry_msgs::msg::Point start;
+    geometry_msgs::msg::Point end;
+    start.x = reference_position.x();
+    start.y = reference_position.y();
+    start.z = reference_position.z();
+    end.x = start.x + joystick_linear.x();
+    end.y = start.y + joystick_linear.y();
+    end.z = start.z + joystick_linear.z();
+
+    marker_msg.points = {start, end};
+    joystick_linear_marker_pub_->publish(marker_msg);
+  }
+
   void FractionalTeleoperationNode::controlUpdate()
   {
     typedef extender_msgs::msg::TeleopCommand Mode;
@@ -324,12 +474,12 @@ namespace fractional_teleoperation_node
       updateGainK();
     }
 
-    // Apply fractional-order differential law: D^alpha x_d(t) = K u(t)
-    // This is implemented by integrating the fractional derivative numerically
-    Eigen::Vector3d previous_desired_position_linear = desired_position_linear_;
-    Eigen::Vector3d previous_desired_position_angular = desired_position_angular_;
+    // Apply fractional-order differential law on offset:
+    // D^alpha Delta x(t) = K u(t)
+    Eigen::Vector3d previous_fractional_offset_linear = fractional_offset_linear_;
+    Eigen::Vector3d previous_fractional_offset_angular = fractional_offset_angular_;
 
-    desired_position_linear_ = fractional_teleoperation::core::applyFractionalIntegration(
+    fractional_offset_linear_ = fractional_teleoperation::core::applyFractionalIntegration(
       joystick_linear,
       linear_history_,
       gl_coefficients_,
@@ -337,7 +487,7 @@ namespace fractional_teleoperation_node
       dt_,
       current_alpha_,
       gain_K_);
-    desired_position_angular_ = fractional_teleoperation::core::applyFractionalIntegration(
+    fractional_offset_angular_ = fractional_teleoperation::core::applyFractionalIntegration(
       joystick_angular,
       angular_history_,
       gl_coefficients_,
@@ -346,17 +496,55 @@ namespace fractional_teleoperation_node
       current_alpha_,
       gain_K_);
 
-    if (enable_marker_visualization_) {
-      publishDesiredPositionMarker(desired_position_linear_);
+    // Reconstruct desired position from drifting reference and fractional offset
+    const Eigen::Vector3d desired_position_linear = reference_position_linear_ + fractional_offset_linear_;
+    const Eigen::Vector3d desired_position_angular = reference_position_angular_ + fractional_offset_angular_;
+
+    if (use_reference_drift_)
+    {
+      if (reference_update_mode_ == "fractional")
+      {
+      reference_position_linear_ = fractional_teleoperation::core::updateReferencePositionFractional(
+        reference_position_linear_,
+        desired_position_linear,
+        reference_linear_history_,
+        reference_gl_coefficients_,
+        memory_length_,
+        dt_,
+        reference_alpha_,
+        reference_fractional_gain_);
+      reference_position_angular_ = fractional_teleoperation::core::updateReferencePositionFractional(
+        reference_position_angular_,
+        desired_position_angular,
+        reference_angular_history_,
+        reference_gl_coefficients_,
+        memory_length_,
+        dt_,
+        reference_alpha_,
+        reference_fractional_gain_);
+      }
+      else
+      {
+      reference_position_linear_ = fractional_teleoperation::core::updateReferencePosition(
+        reference_position_linear_, desired_position_linear, reference_drift_rate_, dt_);
+      reference_position_angular_ = fractional_teleoperation::core::updateReferencePosition(
+        reference_position_angular_, desired_position_angular, reference_drift_rate_, dt_);
+      }
     }
 
-    // Compute Cartesian velocities from desired positions
+    if (enable_marker_visualization_) {
+      publishDesiredPositionMarker(desired_position_linear);
+      publishReferencePositionMarker(reference_position_linear_);
+      publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
+    }
+
+    // Compute Cartesian velocities from fractional offset Delta x
     Eigen::Vector3d cartesian_linear_velocity = 
       fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-        desired_position_linear_, previous_desired_position_linear, dt_); // Relative motion
+        fractional_offset_linear_, previous_fractional_offset_linear, dt_);
     Eigen::Vector3d cartesian_angular_velocity = 
       fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-        desired_position_angular_, previous_desired_position_angular, dt_);
+        fractional_offset_angular_, previous_fractional_offset_angular, dt_);
 
     fractional_teleoperation::core::transformApplyModeAndScale(
         cartesian_linear_velocity,
@@ -381,7 +569,7 @@ namespace fractional_teleoperation_node
 
     // Publish marker visualization for velocity command
     if (enable_marker_visualization_) {
-      publishMarker(vel_cmd, desired_position_linear_);
+      publishMarker(vel_cmd, desired_position_linear);
     }
   }
 

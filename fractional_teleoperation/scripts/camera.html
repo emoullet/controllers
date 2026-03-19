@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+    <style>
+        #status { font-weight: bold; }
+        .connected { color: green; }
+        .disconnected { color: red; }
+    </style>
+</head>
+<body>
+    <h1>ROS2 Webcam Bridge</h1>
+    <p>Status: <span id="status" class="disconnected">Disconnected</span></p>
+    <video id="video" width="640" height="480" autoplay></video>
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        
+        // 1. Initialize ROS connection
+        const ros = new ROSLIB.Ros({ url: 'ws://localhost:9090' });
+
+        // 2. The "On Connection" Block
+        ros.on('connection', function() {
+            console.log('Connected to websocket server.');
+            statusEl.innerText = 'Connected';
+            statusEl.className = 'connected';
+            // Manually advertise the topic once connected
+            imageTopic.advertise();
+        });
+
+        ros.on('error', function(error) {
+            console.log('Error connecting to websocket server: ', error);
+            statusEl.innerText = 'Error';
+            statusEl.className = 'disconnected';
+        });
+
+        ros.on('close', function() {
+            console.log('Connection to websocket server closed.');
+            statusEl.innerText = 'Closed';
+            statusEl.className = 'disconnected';
+        });
+
+        // 3. Define the Topic
+        const imageTopic = new ROSLIB.Topic({
+            ros: ros,
+            name: '/image_raw',
+            messageType: 'sensor_msgs/msg/CompressedImage'
+        });
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+
+        // 4. Capture and Publish
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+            video.srcObject = stream;
+            setInterval(() => {
+                // Only publish if we are actually connected to ROS
+                if (ros.isConnected) {
+                    context.drawImage(video, 0, 0, 640, 480);
+                    const base64Image = canvas.toDataURL('image/jpeg', 0.6);
+                    const msg = new ROSLIB.Message({
+                        format: 'jpeg',
+                        data: base64Image.split(',')[1] 
+                    });
+                    imageTopic.publish(msg);
+                }
+            }, 33); // ~30 FPS
+        }).catch(err => {
+            console.error("Webcam access denied: ", err);
+        });
+    </script>
+</body>
+</html>
