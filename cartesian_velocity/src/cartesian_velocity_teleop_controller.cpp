@@ -37,7 +37,7 @@ namespace cartesian_velocity_controller
 
   CallbackReturn CartesianVelocityTeleopController::on_init()
   {
-    // Create a subscription to the "cmd_vel" topic to receive teleoperation commands
+    // Create a subscription to the "teleop_cmd" topic to receive teleoperation commands
     twist_sub_ = get_node()->create_subscription<extender_msgs::msg::TeleopCommand>(
         "/teleop_cmd", 10,
         std::bind(&CartesianVelocityTeleopController::twistCallback, this, std::placeholders::_1));

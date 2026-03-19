@@ -33,6 +33,8 @@ def generate_launch_description():
     host_id = LaunchConfiguration("host_id")
     use_poc2 = LaunchConfiguration("use_POC2")
     use_joystick_interface = LaunchConfiguration("use_joystick_interface")
+    render_engine = LaunchConfiguration("render_engine")
+    software_rendering = LaunchConfiguration("software_rendering")
 
     declared_arguments = [
         DeclareLaunchArgument(
@@ -40,10 +42,13 @@ def generate_launch_description():
             default_value="true",
             description="Start RViz2 automatically with this launch file.",
         ),
-        DeclareLaunchArgument(
-            "use_sim_time",
+        DeclareLaunchArgument(            "use_simulation",
             default_value="false",
-            description="If true, use simulated clock",
+            description="Launch simulation stack instead of hardware stack"
+        ),
+        DeclareLaunchArgument(            'use_sim_time', 
+            default_value='false', 
+            description='If true, use simulated clock'
         ),
         DeclareLaunchArgument(
             "use_actuator_interface",
@@ -73,6 +78,16 @@ def generate_launch_description():
             default_value="false",
             description="Start joystick_interface node (disable when using tablette UI).",
         ),
+        DeclareLaunchArgument(
+            'render_engine',
+            description='Gazebo render engine (ogre or ogre2)'
+            default_value='ogre',
+        ),
+        DeclareLaunchArgument(
+            default_value='true',
+            'software_rendering',
+            description='Force software OpenGL rendering for Gazebo GUI'
+        )
     ]
 
     # --------------------------------------------------------------------------
@@ -109,12 +124,13 @@ def generate_launch_description():
             [FindPackageShare("explorer_bringup"), "/launch/simulation_base.launch.py"]
         ),
         launch_arguments={
-            "use_POC2": use_poc2,
-            "gui": gui,
-            "use_sim_time": use_sim_time,
-            "rviz_delay": "0.0",
-            "extra_controllers_config": velocity_config,
-            "use_custom_controllers": "true",
+            'use_POC2': use_poc2,
+            'gui': gui,
+            'use_sim_time': use_sim_time,
+            'rviz_delay': '0.0',
+            'extra_controllers_config': velocity_config,
+            'render_engine': render_engine,
+            'software_rendering': software_rendering,
         }.items(),
         condition=IfCondition(use_simulation),
     )
