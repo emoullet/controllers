@@ -28,6 +28,11 @@ ament_target_dependencies(fractional_teleoperation_core
   Eigen3
 )
 
+add_library(fractional_teleoperation_ramp STATIC
+  src/ramp_profile.cpp
+)
+ament_target_dependencies(fractional_teleoperation_ramp)
+
 add_library(${PROJECT_NAME} SHARED
   src/fractional_teleoperation_controller.cpp
 )
@@ -43,6 +48,7 @@ ament_target_dependencies(${PROJECT_NAME}
 )
 target_link_libraries(${PROJECT_NAME}
   fractional_teleoperation_core
+  fractional_teleoperation_ramp
 )
 
 # Add executable for fractional teleoperation node
@@ -56,6 +62,7 @@ ament_target_dependencies(fractional_teleoperation_node
 )
 target_link_libraries(fractional_teleoperation_node
   fractional_teleoperation_core
+  fractional_teleoperation_ramp
 )
 
 # Pluginlib export for controller discovery

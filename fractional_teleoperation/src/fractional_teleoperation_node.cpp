@@ -15,7 +15,11 @@ namespace fractional_teleoperation_node
         reference_position_linear_(Eigen::Vector3d::Zero()),
         reference_position_angular_(Eigen::Vector3d::Zero()),
         current_orientation_(Eigen::Quaterniond::Identity()),
-        current_alpha_(1.5)
+        current_alpha_(1.5),
+        joystick_was_active_(false),
+        joystick_active_duration_(0.0),
+        last_linear_scale_(0.0),
+        last_angular_scale_(0.0)
   {
     // Load all parameters
     loadParameters();
@@ -33,12 +37,12 @@ namespace fractional_teleoperation_node
       alpha_ = std::clamp(alpha_, 0.1, 1.9);
     }
 
-    // Validate adaptive gain mode
+    // Validate gain normalization mode
     std::transform(adaptive_gain_mode_.begin(), adaptive_gain_mode_.end(), adaptive_gain_mode_.begin(), ::tolower);
     if (adaptive_gain_mode_ != "dt" && adaptive_gain_mode_ != "perceptual")
     {
       RCLCPP_WARN(get_logger(),
-                  "Invalid adaptive_gain_mode '%s'. Use 'dt' or 'perceptual'. Defaulting to 'dt'.",
+                  "Invalid alpha_gain_normalization_mode '%s'. Use 'dt' or 'perceptual'. Defaulting to 'dt'.",
                   adaptive_gain_mode_.c_str());
       adaptive_gain_mode_ = "dt";
     }
@@ -77,26 +81,35 @@ namespace fractional_teleoperation_node
     // Log configuration
     RCLCPP_INFO(get_logger(), "Fractional-Order Teleoperation Node:");
     RCLCPP_INFO(get_logger(), "  alpha (fractional order): %.4f", alpha_);
-    RCLCPP_INFO(get_logger(), "  gain_K: %.6f", gain_K_);
+    RCLCPP_INFO(get_logger(), "  fractional_offset_gain: %.6f", gain_K_);
     RCLCPP_INFO(get_logger(), "  memory_length: %d", memory_length_);
     RCLCPP_INFO(get_logger(), "  dt: %.6f s", dt_);
-    RCLCPP_INFO(get_logger(), "  velocity_scale: %.4f", velocity_scale_);
+    RCLCPP_INFO(get_logger(), "  output_velocity_scale: %.4f", velocity_scale_);
+    RCLCPP_INFO(get_logger(), "  global_linear_velocity_saturation: %.4f", global_linear_velocity_saturation_);
+    RCLCPP_INFO(get_logger(), "  global_angular_velocity_saturation: %.4f", global_angular_velocity_saturation_);
     RCLCPP_INFO(get_logger(), "  input_frame: %s", input_frame_.c_str());
-    RCLCPP_INFO(get_logger(), "  adapt_gain_to_alpha: %s", adapt_gain_to_alpha_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "  normalize_gain_for_alpha: %s", adapt_gain_to_alpha_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "  reference_drift_joystick_threshold: %.4f", reference_drift_joystick_threshold_);
+    RCLCPP_INFO(get_logger(), "  joystick_active_threshold: %.4f", joystick_active_threshold_);
+    RCLCPP_INFO(get_logger(), "  snap_reference_on_release: %s", snap_reference_on_release_ ? "true" : "false");
+    RCLCPP_INFO(get_logger(), "  linear_offset_scale_max: %.4f", fractional_offset_linear_scale_max_);
+    RCLCPP_INFO(get_logger(), "  angular_offset_scale_max: %.4f", fractional_offset_angular_scale_max_);
+    RCLCPP_INFO(get_logger(), "  offset_ramp_time: %.4f s", fractional_offset_scale_ramp_time_);
+    RCLCPP_INFO(get_logger(), "  offset_ramp_profile: %s", fractional_offset_scale_ramp_profile_.c_str());
     RCLCPP_INFO(get_logger(), "  use_reference_drift: %s", use_reference_drift_ ? "true" : "false");
     if (use_reference_drift_)
     {
-      RCLCPP_INFO(get_logger(), "  reference_drift_rate: %.4f 1/s", reference_drift_rate_);
+      RCLCPP_INFO(get_logger(), "  reference_first_order_rate: %.4f 1/s", reference_drift_rate_);
       RCLCPP_INFO(get_logger(), "  reference_update_mode: %s", reference_update_mode_.c_str());
       if (reference_update_mode_ == "fractional")
       {
-        RCLCPP_INFO(get_logger(), "  reference_alpha: %.4f", reference_alpha_);
+        RCLCPP_INFO(get_logger(), "  reference_fractional_alpha: %.4f", reference_alpha_);
         RCLCPP_INFO(get_logger(), "  reference_fractional_gain: %.4f", reference_fractional_gain_);
       }
     }
     if (adapt_gain_to_alpha_)
     {
-      RCLCPP_INFO(get_logger(), "  adaptive_gain_mode: %s", adaptive_gain_mode_.c_str());
+      RCLCPP_INFO(get_logger(), "  alpha_gain_normalization_mode: %s", adaptive_gain_mode_.c_str());
       RCLCPP_INFO(get_logger(), "  v_max: %.3f m/s", v_max_);
       if (adaptive_gain_mode_ == "perceptual")
       {
@@ -108,6 +121,7 @@ namespace fractional_teleoperation_node
     if (use_dynamic_alpha_)
     {
       RCLCPP_INFO(get_logger(), "  Dynamic Alpha Enabled:");
+      RCLCPP_INFO(get_logger(), "    alpha_min: %.4f", alpha_min_);
       RCLCPP_INFO(get_logger(), "    alpha_max: %.4f", alpha_max_);
       RCLCPP_INFO(get_logger(), "    l_0 (lower threshold): %.4f", l_0_);
       RCLCPP_INFO(get_logger(), "    l_max (upper threshold): %.4f", l_max_);
@@ -137,13 +151,15 @@ namespace fractional_teleoperation_node
   void FractionalTeleoperationNode::loadParameters()
   {
     declare_parameter("alpha", 1.5);
-    declare_parameter("gain_K", 0.1);
+    declare_parameter("fractional_offset_gain", 0.1);
     declare_parameter("memory_length", 100);
     declare_parameter("dt", 0.01);
-    declare_parameter("velocity_scale", 1.0);
+    declare_parameter("output_velocity_scale", 1.0);
+    declare_parameter("global_linear_velocity_saturation", 0.0);
+    declare_parameter("global_angular_velocity_saturation", 0.0);
     declare_parameter("input_frame", std::string("base"));
-    declare_parameter("adapt_gain_to_alpha", true);
-    declare_parameter("adaptive_gain_mode", std::string("dt"));
+    declare_parameter("normalize_gain_for_alpha", true);
+    declare_parameter("alpha_gain_normalization_mode", std::string("dt"));
     declare_parameter("v_max", 1.0);
     declare_parameter("t_ref", 1.0);
     declare_parameter("enable_marker_visualization", true);
@@ -158,24 +174,34 @@ namespace fractional_teleoperation_node
     declare_parameter("reference_position_marker_scale", 0.04);
     declare_parameter("joystick_linear_marker_topic", std::string("/joystick_linear_marker"));
     declare_parameter("use_dynamic_alpha", false);
+    declare_parameter("alpha_min", 0.0);
     declare_parameter("alpha_max", 1.0);
     declare_parameter("l_0", 0.1);
     declare_parameter("l_max", 1.0);
     declare_parameter("use_reference_drift", true);
-    declare_parameter("reference_drift_rate", 0.15);
+    declare_parameter("reference_first_order_rate", 0.15);
+    declare_parameter("reference_drift_joystick_threshold", 0.0);
+    declare_parameter("joystick_active_threshold", 0.01);
+    declare_parameter("snap_reference_on_release", false);
     declare_parameter("reference_update_mode", std::string("first_order"));
-    declare_parameter("reference_alpha", 0.8);
+    declare_parameter("reference_fractional_alpha", 0.8);
     declare_parameter("reference_fractional_gain", 0.15);
+    declare_parameter("linear_offset_scale_max", 1.0);
+    declare_parameter("angular_offset_scale_max", 1.0);
+    declare_parameter("offset_ramp_time", 0.5);
+    declare_parameter("offset_ramp_profile", std::string("sigmoid"));
     declare_parameter("vel_cmd_topic", std::string("/vel_cmd"));
 
     alpha_ = get_parameter("alpha").as_double();
-    gain_K_ = get_parameter("gain_K").as_double();
+    gain_K_ = get_parameter("fractional_offset_gain").as_double();
     memory_length_ = get_parameter("memory_length").as_int();
     dt_ = get_parameter("dt").as_double();
-    velocity_scale_ = get_parameter("velocity_scale").as_double();
+    velocity_scale_ = get_parameter("output_velocity_scale").as_double();
+    global_linear_velocity_saturation_ = get_parameter("global_linear_velocity_saturation").as_double();
+    global_angular_velocity_saturation_ = get_parameter("global_angular_velocity_saturation").as_double();
     input_frame_ = get_parameter("input_frame").as_string();
-    adapt_gain_to_alpha_ = get_parameter("adapt_gain_to_alpha").as_bool();
-    adaptive_gain_mode_ = get_parameter("adaptive_gain_mode").as_string();
+    adapt_gain_to_alpha_ = get_parameter("normalize_gain_for_alpha").as_bool();
+    adaptive_gain_mode_ = get_parameter("alpha_gain_normalization_mode").as_string();
     v_max_ = get_parameter("v_max").as_double();
     t_ref_ = get_parameter("t_ref").as_double();
     enable_marker_visualization_ = get_parameter("enable_marker_visualization").as_bool();
@@ -190,22 +216,66 @@ namespace fractional_teleoperation_node
     reference_position_marker_scale_ = get_parameter("reference_position_marker_scale").as_double();
     joystick_linear_marker_topic_ = get_parameter("joystick_linear_marker_topic").as_string();
     use_dynamic_alpha_ = get_parameter("use_dynamic_alpha").as_bool();
+    alpha_min_ = get_parameter("alpha_min").as_double();
     alpha_max_ = get_parameter("alpha_max").as_double();
     l_0_ = get_parameter("l_0").as_double();
     l_max_ = get_parameter("l_max").as_double();
     use_reference_drift_ = get_parameter("use_reference_drift").as_bool();
-    reference_drift_rate_ = get_parameter("reference_drift_rate").as_double();
+    reference_drift_rate_ = get_parameter("reference_first_order_rate").as_double();
+    reference_drift_joystick_threshold_ = get_parameter("reference_drift_joystick_threshold").as_double();
+    joystick_active_threshold_ = get_parameter("joystick_active_threshold").as_double();
+    snap_reference_on_release_ = get_parameter("snap_reference_on_release").as_bool();
     reference_update_mode_ = get_parameter("reference_update_mode").as_string();
-    reference_alpha_ = get_parameter("reference_alpha").as_double();
+    reference_alpha_ = get_parameter("reference_fractional_alpha").as_double();
     reference_fractional_gain_ = get_parameter("reference_fractional_gain").as_double();
+    fractional_offset_linear_scale_max_ = get_parameter("linear_offset_scale_max").as_double();
+    fractional_offset_angular_scale_max_ = get_parameter("angular_offset_scale_max").as_double();
+    fractional_offset_scale_ramp_time_ = get_parameter("offset_ramp_time").as_double();
+    fractional_offset_scale_ramp_profile_ = get_parameter("offset_ramp_profile").as_string();
 
     if (reference_drift_rate_ < 0.0)
     {
       RCLCPP_WARN(
           get_logger(),
-          "reference_drift_rate must be >= 0. Received %.4f, clamping to 0.",
+          "reference_first_order_rate must be >= 0. Received %.4f, clamping to 0.",
           reference_drift_rate_);
       reference_drift_rate_ = 0.0;
+    }
+
+    if (reference_drift_joystick_threshold_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "reference_drift_joystick_threshold must be >= 0. Received %.4f, clamping to 0.",
+          reference_drift_joystick_threshold_);
+      reference_drift_joystick_threshold_ = 0.0;
+    }
+
+    if (joystick_active_threshold_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "joystick_active_threshold must be >= 0. Received %.4f, clamping to 0.",
+          joystick_active_threshold_);
+      joystick_active_threshold_ = 0.0;
+    }
+
+    if (global_linear_velocity_saturation_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "global_linear_velocity_saturation must be >= 0. Received %.4f, clamping to 0.",
+          global_linear_velocity_saturation_);
+      global_linear_velocity_saturation_ = 0.0;
+    }
+
+    if (global_angular_velocity_saturation_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "global_angular_velocity_saturation must be >= 0. Received %.4f, clamping to 0.",
+          global_angular_velocity_saturation_);
+      global_angular_velocity_saturation_ = 0.0;
     }
 
     std::transform(
@@ -226,7 +296,7 @@ namespace fractional_teleoperation_node
     {
       RCLCPP_WARN(
           get_logger(),
-          "Invalid reference_alpha=%.3f. Must be in (0, 2). Clamping to [0.1, 1.9].",
+          "Invalid reference_fractional_alpha=%.3f. Must be in (0, 2). Clamping to [0.1, 1.9].",
           reference_alpha_);
       reference_alpha_ = std::clamp(reference_alpha_, 0.1, 1.9);
     }
@@ -238,6 +308,68 @@ namespace fractional_teleoperation_node
           "reference_fractional_gain must be >= 0. Received %.4f, clamping to 0.",
           reference_fractional_gain_);
       reference_fractional_gain_ = 0.0;
+    }
+
+    if (alpha_min_ < 0.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "alpha_min must be >= 0. Received %.4f, clamping to 0.",
+          alpha_min_);
+      alpha_min_ = 0.0;
+    }
+
+    if (alpha_max_ >= 2.0)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "alpha_max must be < 2. Received %.4f, clamping to 1.9.",
+          alpha_max_);
+      alpha_max_ = 1.9;
+    }
+
+    if (alpha_min_ > alpha_max_)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "alpha_min (%.4f) must be <= alpha_max (%.4f). Setting alpha_min=alpha_max.",
+          alpha_min_,
+          alpha_max_);
+      alpha_min_ = alpha_max_;
+    }
+
+    if (fractional_offset_linear_scale_max_ < 0.0)
+    {
+      RCLCPP_WARN(get_logger(),
+          "linear_offset_scale_max must be >= 0. Received %.4f, clamping to 0.",
+          fractional_offset_linear_scale_max_);
+      fractional_offset_linear_scale_max_ = 0.0;
+    }
+
+    if (fractional_offset_angular_scale_max_ < 0.0)
+    {
+      RCLCPP_WARN(get_logger(),
+          "angular_offset_scale_max must be >= 0. Received %.4f, clamping to 0.",
+          fractional_offset_angular_scale_max_);
+      fractional_offset_angular_scale_max_ = 0.0;
+    }
+
+    if (fractional_offset_scale_ramp_time_ < 0.0)
+    {
+      RCLCPP_WARN(get_logger(),
+          "offset_ramp_time must be >= 0. Received %.4f, clamping to 0.",
+          fractional_offset_scale_ramp_time_);
+      fractional_offset_scale_ramp_time_ = 0.0;
+    }
+
+    // Validate ramp profile
+    try {
+      fractional_offset_scale_ramp_profile_ = fractional_teleoperation::ramp::validateProfileName(fractional_offset_scale_ramp_profile_);
+    } catch (const std::invalid_argument& e) {
+      RCLCPP_WARN(get_logger(),
+          "Invalid ramp profile '%s'. %s. Using 'sigmoid'.",
+          fractional_offset_scale_ramp_profile_.c_str(), e.what());
+      fractional_offset_scale_ramp_profile_ = "sigmoid";
     }
 
     // Initialize current_alpha_ based on use_dynamic_alpha
@@ -457,12 +589,17 @@ namespace fractional_teleoperation_node
                                      latest_joystick_.angular.y,
                                      latest_joystick_.angular.z);
 
+    // Snapshot reference position for reference velocity computation.
+    const Eigen::Vector3d previous_reference_position_linear = reference_position_linear_;
+    const Eigen::Vector3d previous_reference_position_angular = reference_position_angular_;
+
     const double alpha_threshold = 0.001;
     fractional_teleoperation::core::updateDynamicAlphaAndCoefficients(
         use_dynamic_alpha_,
         joystick_linear,
         l_0_,
         l_max_,
+      alpha_min_,
         alpha_max_,
         alpha_threshold,
         current_alpha_,
@@ -476,8 +613,12 @@ namespace fractional_teleoperation_node
 
     // Apply fractional-order differential law on offset:
     // D^alpha Delta x(t) = K u(t)
-    Eigen::Vector3d previous_fractional_offset_linear = fractional_offset_linear_;
-    Eigen::Vector3d previous_fractional_offset_angular = fractional_offset_angular_;
+    // Snapshot previous tick's scaled offsets for velocity: d(scale*Δx)/dt
+    Eigen::Vector3d previous_scaled_offset_linear  = fractional_offset_linear_  * last_linear_scale_;
+    Eigen::Vector3d previous_scaled_offset_angular = fractional_offset_angular_ * last_angular_scale_;
+    // Snapshot pre-update unscaled offsets for snap-on-release
+    const Eigen::Vector3d pre_update_offset_linear  = fractional_offset_linear_;
+    const Eigen::Vector3d pre_update_offset_angular = fractional_offset_angular_;
 
     fractional_offset_linear_ = fractional_teleoperation::core::applyFractionalIntegration(
       joystick_linear,
@@ -496,11 +637,48 @@ namespace fractional_teleoperation_node
       current_alpha_,
       gain_K_);
 
-    // Reconstruct desired position from drifting reference and fractional offset
-    const Eigen::Vector3d desired_position_linear = reference_position_linear_ + fractional_offset_linear_;
-    const Eigen::Vector3d desired_position_angular = reference_position_angular_ + fractional_offset_angular_;
+    // Ramp scale: configurable profile from 0 when joystick is inactive to scale_max over ramp_time seconds.
+    const bool joystick_active = joystick_linear.norm() > joystick_active_threshold_;
+    if (joystick_active)
+    {
+      joystick_active_duration_ += dt_;
+    }
+    else
+    {
+      joystick_active_duration_ = 0.0;
+    }
+    const double t_ratio = (fractional_offset_scale_ramp_time_ > 0.0)
+        ? std::min(1.0, joystick_active_duration_ / fractional_offset_scale_ramp_time_)
+        : 1.0;
+    const double ramp_factor = fractional_teleoperation::ramp::computeRampFactor(t_ratio, fractional_offset_scale_ramp_profile_);
+    const double current_linear_scale  = fractional_offset_linear_scale_max_  * ramp_factor;
+    const double current_angular_scale = fractional_offset_angular_scale_max_ * ramp_factor;
 
-    if (use_reference_drift_)
+    const Eigen::Vector3d scaled_offset_linear  = fractional_offset_linear_  * current_linear_scale;
+    const Eigen::Vector3d scaled_offset_angular = fractional_offset_angular_ * current_angular_scale;
+
+    // Reconstruct desired position from drifting reference and scaled fractional offset
+    const Eigen::Vector3d desired_position_linear  = reference_position_linear_  + scaled_offset_linear;
+    const Eigen::Vector3d desired_position_angular = reference_position_angular_ + scaled_offset_angular;
+
+    // Snap reference to current desired position on joystick release (non-zero -> zero transition)
+    if (snap_reference_on_release_ && joystick_was_active_ && !joystick_active)
+    {
+      reference_position_linear_  = reference_position_linear_  + pre_update_offset_linear  * last_linear_scale_;
+      reference_position_angular_ = reference_position_angular_ + pre_update_offset_angular * last_angular_scale_;
+      fractional_offset_linear_.setZero();
+      fractional_offset_angular_.setZero();
+      linear_history_.clear();
+      angular_history_.clear();
+      previous_scaled_offset_linear.setZero();
+      previous_scaled_offset_angular.setZero();
+    }
+    joystick_was_active_ = joystick_active;
+    last_linear_scale_  = current_linear_scale;
+    last_angular_scale_ = current_angular_scale;
+
+    if (use_reference_drift_ &&
+        joystick_linear.norm() >= reference_drift_joystick_threshold_)
     {
       if (reference_update_mode_ == "fractional")
       {
@@ -538,13 +716,28 @@ namespace fractional_teleoperation_node
       publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
     }
 
-    // Compute Cartesian velocities from fractional offset Delta x
-    Eigen::Vector3d cartesian_linear_velocity = 
+    Eigen::Vector3d reference_linear_velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d reference_angular_velocity = Eigen::Vector3d::Zero();
+    if (use_reference_drift_)
+    {
+      reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+        reference_position_linear_, previous_reference_position_linear, dt_);
+      reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+        reference_position_angular_, previous_reference_position_angular, dt_);
+    }
+
+    // Compute Cartesian velocities from scaled fractional offset: d(scale*Δx)/dt
+    Eigen::Vector3d cartesian_linear_velocity =
       fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-        fractional_offset_linear_, previous_fractional_offset_linear, dt_);
-    Eigen::Vector3d cartesian_angular_velocity = 
+        scaled_offset_linear, previous_scaled_offset_linear, dt_);
+    Eigen::Vector3d cartesian_angular_velocity =
       fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-        fractional_offset_angular_, previous_fractional_offset_angular, dt_);
+        scaled_offset_angular, previous_scaled_offset_angular, dt_);
+
+    // Compensate for reference drift in the commanded Cartesian velocity.
+    // This keeps output speed behavior comparable when drift is enabled.
+    cartesian_linear_velocity -= reference_linear_velocity;
+    cartesian_angular_velocity -= reference_angular_velocity;
 
     fractional_teleoperation::core::transformApplyModeAndScale(
         cartesian_linear_velocity,
@@ -555,6 +748,24 @@ namespace fractional_teleoperation_node
         Mode::TRANSLATION,
         Mode::ROTATION,
         velocity_scale_);
+
+    if (global_linear_velocity_saturation_ > 0.0)
+    {
+      const double linear_velocity_norm = cartesian_linear_velocity.norm();
+      if (linear_velocity_norm > global_linear_velocity_saturation_)
+      {
+        cartesian_linear_velocity *= global_linear_velocity_saturation_ / linear_velocity_norm;
+      }
+    }
+
+    if (global_angular_velocity_saturation_ > 0.0)
+    {
+      const double angular_velocity_norm = cartesian_angular_velocity.norm();
+      if (angular_velocity_norm > global_angular_velocity_saturation_)
+      {
+        cartesian_angular_velocity *= global_angular_velocity_saturation_ / angular_velocity_norm;
+      }
+    }
 
     // Create and publish velocity command
     geometry_msgs::msg::Twist vel_cmd;

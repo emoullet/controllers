@@ -1,17 +1,44 @@
 fractional_teleoperation_node:
   ros__parameters:
     # Fractional-order parameters
-    alpha: 0.                   # Fractional order (0 < alpha < 2)
-    gain_K: 1.                 # Gain in fractional law D^alpha x_d = K u
+    alpha: 0.5                   # Fractional order (0 < alpha < 2)
+    fractional_offset_gain: 1.  # Gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
-    velocity_scale: 1.0           # Overall velocity scaling factor
+    output_velocity_scale: 1.0    # Overall output velocity scaling factor
+    global_linear_velocity_saturation: 0.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
+    global_angular_velocity_saturation: 0.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
-    adapt_gain_to_alpha: false     # Adapt K to alpha using K = v_max * dt^(1-alpha)
-    adaptive_gain_mode: "perceptual"      # "dt" or "perceptual"
+    normalize_gain_for_alpha: false         # Normalize K across alpha using v_max-based formulas
+    alpha_gain_normalization_mode: "perceptual"  # "dt" or "perceptual"
     v_max: 1.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
     
+    # Dynamic alpha parameters
+    use_dynamic_alpha: true         # Enable dynamic alpha adjustment based on joystick norm
+    alpha_min: 0.1          # Minimum alpha value when joystick is below l_0
+    alpha_max: 1.0        # Maximum alpha value when joystick is at or above l_max
+    l_0: 0.5              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
+    l_max: 1.0           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
+    alpha_threshold: 0.001  # Minimum alpha used by the dynamic-alpha update logic
+
+    # Fractional offset scaling (configurable ramp from 0 to max over scale_ramp_time)
+    linear_offset_scale_max: 2.0      # Max linear fractional offset scale (reached after ramp_time of joystick activity)
+    angular_offset_scale_max: 1.0     # Max angular fractional offset scale
+    offset_ramp_time: 2.5             # Ramp duration (s); 0 = instantaneous
+    offset_ramp_profile: "exponential"  # Ramp profile: linear, quadratic, smoothstep, sigmoid, exponential, inverse_exponential, tanh, cubic_hermite, step
+
+    # Desired position is expressed as (x_des - x_ref), with slow drift of x_ref
+
+    joystick_active_threshold: 0.01  # Joystick is considered "active" for ramp scaling when ||joystick_linear|| >= this value
+    snap_reference_on_release: true          # Snap x_ref to current x_des when joystick transitions from active to zero    
+    use_reference_drift: true   # Enable slow drift of reference position towards current position to prevent long-term drift
+    reference_drift_joystick_threshold: 0.5  # Drift only when ||joystick_linear|| >= this value
+    reference_first_order_rate: 0.5          # Exponential blend rate (1/s), used only in "first_order" reference update mode
+    reference_update_mode: "fractional"     # "first_order" or "fractional"
+    reference_fractional_alpha: 0.5          # Fractional order used only in "fractional" reference update mode
+    reference_fractional_gain: 0.5           # Gain of the fractional reference update law; not equivalent to first-order rate
+
     # Output topic configuration
     vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands
     
@@ -28,15 +55,3 @@ fractional_teleoperation_node:
     reference_position_marker_scale: 0.07
     joystick_linear_marker_topic: "/joystick_linear_marker"
     
-    # Dynamic alpha parameters
-    use_dynamic_alpha: false
-    alpha_max: 1.0
-    l_0: 0.1
-    l_max: 1.0
-
-    # Desired position is expressed as (x_des - x_ref), with slow drift of x_ref
-    use_reference_drift: true
-    reference_drift_rate: 0.5
-    reference_update_mode: "fractional"   # "first_order" or "fractional"
-    reference_alpha: 0.5                    # Used when reference_update_mode="fractional"
-    reference_fractional_gain: 0.5           # Gain K in fractional update of reference position

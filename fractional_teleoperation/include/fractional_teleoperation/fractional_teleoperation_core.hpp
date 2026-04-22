@@ -11,7 +11,7 @@ namespace fractional_teleoperation::core
 {
 std::vector<double> computeGrunwaldCoefficients(int memory_length, double alpha);
 
-double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha_max);
+double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha_min, double alpha_max);
 
 Eigen::Vector3d applyFractionalIntegration(
     const Eigen::Vector3d & input_velocity,
@@ -55,6 +55,7 @@ void updateDynamicAlphaAndCoefficients(
     const Eigen::Vector3d & joystick_linear,
     double l_0,
     double l_max,
+    double alpha_min,
     double alpha_max,
     double alpha_threshold,
     double & current_alpha,

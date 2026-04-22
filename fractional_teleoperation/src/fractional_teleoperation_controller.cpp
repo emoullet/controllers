@@ -51,10 +51,10 @@ namespace fractional_teleoperation_controller
   void FractionalTeleoperationController::loadParameters()
   {
     declare_and_get_parameters("alpha", alpha_, 1.5);
-    declare_and_get_parameters("gain_K", gain_K_, 0.1);
+    declare_and_get_parameters("fractional_offset_gain", gain_K_, 0.1);
     declare_and_get_parameters("memory_length", memory_length_, 100);
     declare_and_get_parameters("dt", dt_, 0.01);
-    declare_and_get_parameters("velocity_scale", velocity_scale_, 1.0);
+    declare_and_get_parameters("output_velocity_scale", velocity_scale_, 1.0);
     declare_and_get_parameters("input_frame", input_frame_, std::string("base"));
     declare_and_get_parameters("robot_type", robot_type_, std::string("explorer_velocity"));
     declare_and_get_parameters("command_names", command_names_, std::vector<std::string>{});
@@ -147,10 +147,10 @@ namespace fractional_teleoperation_controller
     // Logging
     RCLCPP_INFO(node->get_logger(), "Fractional-Order Teleoperation Controller:");
     RCLCPP_INFO(node->get_logger(), "  alpha (fractional order): %.4f", alpha_);
-    RCLCPP_INFO(node->get_logger(), "  gain_K: %.4f", gain_K_);
+    RCLCPP_INFO(node->get_logger(), "  fractional_offset_gain: %.4f", gain_K_);
     RCLCPP_INFO(node->get_logger(), "  memory_length: %d", memory_length_);
     RCLCPP_INFO(node->get_logger(), "  dt: %.6f s", dt_);
-    RCLCPP_INFO(node->get_logger(), "  velocity_scale: %.4f", velocity_scale_);
+    RCLCPP_INFO(node->get_logger(), "  output_velocity_scale: %.4f", velocity_scale_);
     RCLCPP_INFO(node->get_logger(), "  input_frame: %s", input_frame_.c_str());
     
     // Log dynamic alpha parameters if enabled
@@ -232,6 +232,7 @@ namespace fractional_teleoperation_controller
         joystick_linear,
         l_0_,
         l_max_,
+      0.0,
         alpha_max_,
         alpha_threshold,
         current_alpha_,

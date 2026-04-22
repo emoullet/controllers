@@ -20,11 +20,11 @@ std::vector<double> computeGrunwaldCoefficients(int memory_length, double alpha)
   return gl_coefficients;
 }
 
-double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha_max)
+double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha_min, double alpha_max)
 {
   if (lambda < l_0)
   {
-    return 0.0;
+    return alpha_min;
   }
 
   if (lambda > l_max)
@@ -33,7 +33,7 @@ double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha
   }
 
   const double ratio = (lambda - l_0) / (l_max - l_0);
-  return ratio * alpha_max;
+  return alpha_min + ratio * (alpha_max - alpha_min);
 }
 
 Eigen::Vector3d applyFractionalIntegration(
@@ -128,6 +128,7 @@ void updateDynamicAlphaAndCoefficients(
     const Eigen::Vector3d & joystick_linear,
     double l_0,
     double l_max,
+  double alpha_min,
     double alpha_max,
     double alpha_threshold,
     double & current_alpha,
@@ -141,7 +142,7 @@ void updateDynamicAlphaAndCoefficients(
   }
 
   const double lambda = joystick_linear.norm();
-  const double new_alpha = computeDynamicAlpha(lambda, l_0, l_max, alpha_max);
+  const double new_alpha = computeDynamicAlpha(lambda, l_0, l_max, alpha_min, alpha_max);
 
   current_alpha = new_alpha;
   if (std::abs(new_alpha - last_alpha) > alpha_threshold)

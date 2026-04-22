@@ -5,6 +5,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "extender_msgs/msg/teleop_command.hpp"
+#include "fractional_teleoperation/ramp_profile.hpp"
 
 #include <Eigen/Dense>
 #include <deque>
@@ -43,6 +44,8 @@ namespace fractional_teleoperation_node
     int memory_length_;
     double dt_;
     double velocity_scale_;
+    double global_linear_velocity_saturation_;
+    double global_angular_velocity_saturation_;
     std::string input_frame_;
     bool adapt_gain_to_alpha_;
     std::string adaptive_gain_mode_;
@@ -50,15 +53,24 @@ namespace fractional_teleoperation_node
     double t_ref_;
     bool use_reference_drift_;
     double reference_drift_rate_;
+    double reference_drift_joystick_threshold_;
+    double joystick_active_threshold_;
+    bool snap_reference_on_release_;
     std::string reference_update_mode_;
     double reference_alpha_;
     double reference_fractional_gain_;
-    
+    double fractional_offset_linear_scale_max_;
+    double fractional_offset_angular_scale_max_;
+    double fractional_offset_scale_ramp_time_;
+    std::string fractional_offset_scale_ramp_profile_;
+
     // Dynamic alpha parameters
     bool use_dynamic_alpha_;
+    double alpha_min_;
     double alpha_max_;
     double l_0_;
     double l_max_;
+    double alpha_threshold_;
     double last_alpha_;
 
     // Marker visualization parameters
@@ -92,6 +104,10 @@ namespace fractional_teleoperation_node
     Eigen::Vector3d reference_position_angular_;
     Eigen::Quaterniond current_orientation_;
     double current_alpha_;
+    bool joystick_was_active_;
+    double joystick_active_duration_;
+    double last_linear_scale_;
+    double last_angular_scale_;
 
     // Grünwald-Letnikov coefficients
     std::vector<double> gl_coefficients_;

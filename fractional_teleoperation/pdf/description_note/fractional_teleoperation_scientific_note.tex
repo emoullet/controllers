@@ -1,0 +1,287 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\geometry{margin=2.2cm}
+
+\title{Fractional Teleoperation in ROS 2:\\Scientific and Algorithmic Description of the Node Implementation}
+\author{Extender Workspace -- fractional\_teleoperation\_node}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note documents the mathematical model and the exact implemented algorithm of the ROS 2 standalone node
+\texttt{fractional\_teleoperation\_node}. The control law is based on a fractional-order relation between joystick input
+and Cartesian offset, discretized with a finite-memory Gr\"unwald--Letnikov (GL) recursion.
+The document first introduces the scientific context of fractional analysis, then details dynamic-order adaptation,
+ramp-based offset scaling, reference drift (first-order and fractional modes), and snap-on-release logic.
+The goal is scientific consistency with the implementation and operational clarity for tuning and validation.
+\end{abstract}
+
+\section{Introduction: Why Fractional Analysis for Teleoperation}
+Fractional calculus extends differentiation and integration to non-integer order and enables operators with memory,
+which is attractive in human-in-the-loop systems where command smoothness and motion persistence are important
+\cite{oldham_spanier_1974,podlubny_1999,monje_2010,diethelm_2010}.
+
+In classical integer-order teleoperation mappings, response shaping is mostly obtained from static gains and filters.
+A fractional operator introduces history-dependent behavior directly in the law:
+\begin{equation}
+{}^{C}_{0}D_t^{\alpha} x(t) = f(t), \quad \alpha \in (0,2),
+\end{equation}
+where $\alpha$ controls memory depth and dynamic character. In practice:
+\begin{itemize}[leftmargin=*]
+\item $\alpha \approx 1$ behaves close to an ordinary integrator relation.
+\item Lower $\alpha$ yields stronger memory and persistent motion trends.
+\item Variable $\alpha$ enables context-sensitive response (fine motion at low input, faster motion at high input).
+\end{itemize}
+
+The node implementation uses a finite-memory GL recursion for real-time operation, a common pragmatic approximation
+in control and signal-processing implementations \cite{podlubny_1999,oustaloup_2000}.
+
+\section{Implemented Control Objective}
+Let $u_k \in \mathbb{R}^3$ be the sampled joystick input (linear and angular channels treated separately),
+$\Delta x_k$ the fractional offset, and $x_{\mathrm{ref},k}$ a drifting reference position.
+The implemented law is:
+\begin{equation}
+{}^{C}_{0}D_t^{\alpha} \Delta x(t) = K\,u(t),
+\end{equation}
+with reconstructed desired state
+\begin{equation}
+x_{\mathrm{des},k} = x_{\mathrm{ref},k} + S_k\,\Delta x_k,
+\end{equation}
+where $S_k$ is a time-varying ramp scale (separate maxima for linear and angular channels).
+The published velocity command is computed from the scaled offset derivative:
+\begin{equation}
+v_k = \frac{S_k\Delta x_k - S_{k-1}\Delta x_{k-1}}{\Delta t}.
+\end{equation}
+
+\section{Discrete Fractional Recursion (GL Approximation)}
+For memory length $L$ and sample time $\Delta t$, coefficients are generated recursively as:
+\begin{equation}
+c_0 = 1, \qquad
+c_k = c_{k-1}\frac{k-1-\alpha}{k}, \quad k \ge 1.
+\end{equation}
+
+The node update uses:
+\begin{equation}
+\Delta x_k = (\Delta t)^{\alpha}K u_k - \sum_{j=1}^{L'} c_j \Delta x_{k-j},
+\end{equation}
+where $L' = \min(L,\text{available history})$. This is applied independently to linear and angular vectors.
+
+\paragraph{Finite-memory implication.}
+The GL operator is truncated to $L$ samples; therefore the implementation is an approximation of ideal long-memory
+fractional dynamics. Increasing $L$ improves fidelity at increased computational cost.
+
+\section{Dynamic Fractional Order \texorpdfstring{$\alpha$}{alpha}}
+When enabled, $\alpha$ is adapted from joystick norm $\lambda = \lVert u_{\text{linear}} \rVert$:
+\begin{equation}
+\alpha(\lambda)=
+\begin{cases}
+\alpha_{\min}, & \lambda < l_0,\\
+\alpha_{\max}, & \lambda > l_{\max},\\
+\alpha_{\min} + (\alpha_{\max}-\alpha_{\min})\dfrac{\lambda-l_0}{l_{\max}-l_0}, & \text{otherwise}.
+\end{cases}
+\end{equation}
+
+When $|\alpha_{\text{new}}-\alpha_{\text{last}}| > 10^{-3}$, GL coefficients are recomputed.
+
+\paragraph{Implementation caveat (variable order).}
+The history buffers are not reprojected when $\alpha$ changes; only coefficients are refreshed.
+This is an engineering approximation for real-time operation and should be interpreted accordingly
+for strict variable-order fractional analysis.
+
+\section{Gain Normalization Across Fractional Orders}
+If normalization is enabled, $K$ is recomputed each cycle using one of two modes:
+\begin{align}
+\texttt{dt mode:} \quad & K = v_{\max}(\Delta t)^{1-\alpha}, \\
+\texttt{perceptual mode:} \quad & K = v_{\max}\,\frac{\Gamma(\alpha)}{t_{\mathrm{ref}}^{\alpha-1}}.
+\end{align}
+For numerical safety in perceptual mode, a lower bound is used before evaluating $\Gamma(\alpha)$.
+
+\section{Offset Ramp Scaling}
+Joystick activity is detected by $\lVert u_{\text{linear}}\rVert > \tau_{\text{active}}$.
+An active-duration timer $T_{\text{active}}$ is incremented while active and reset to zero otherwise.
+Define
+\begin{equation}
+r_k =
+\begin{cases}
+\min\left(1,\dfrac{T_{\text{active}}}{T_{\text{ramp}}}\right), & T_{\text{ramp}} > 0,\\
+1, & T_{\text{ramp}} = 0.
+\end{cases}
+\end{equation}
+Then a profile function $\phi(\cdot)$ produces $\phi(r_k)$ and scales become
+\begin{equation}
+S^{\text{lin}}_k = S^{\text{lin}}_{\max}\phi(r_k), \qquad
+S^{\text{ang}}_k = S^{\text{ang}}_{\max}\phi(r_k).
+\end{equation}
+
+Supported profiles include linear, quadratic, smoothstep, sigmoid, exponential, inverse exponential,
+tanh, cubic Hermite, and step.
+
+\section{Reference Drift and Snap-On-Release}
+\subsection{Reference Drift Gate}
+Drift is applied only if enabled and
+\begin{equation}
+\lVert u_{\text{linear}}\rVert \ge \tau_{\text{drift}}.
+\end{equation}
+
+\subsection{First-Order Reference Drift}
+In first-order mode:
+\begin{equation}
+x_{\mathrm{ref},k+1} = x_{\mathrm{ref},k} + \beta\,\Delta t\,(x_{\mathrm{des},k}-x_{\mathrm{ref},k}),
+\end{equation}
+with clamped blend $\beta\Delta t\in[0,1]$ in code.
+
+\subsection{Fractional Reference Drift}
+In fractional mode, define error $e_k = x_{\mathrm{des},k}-x_{\mathrm{ref},k}$ and use a second fractional integrator:
+\begin{align}
+f_k &= \mathcal{F}_{\alpha_r,K_r}(e_k),\\
+x_{\mathrm{ref},k+1} &= x_{\mathrm{ref},k} + \Delta t\, f_k,
+\end{align}
+where $\mathcal{F}_{\alpha_r,K_r}$ is the same GL-based operator class with parameter mapping
+\begin{equation}
+(\alpha_r,K_r)=\left(\texttt{reference\_fractional\_alpha},\texttt{reference\_fractional\_gain}\right).
+\end{equation}
+
+\subsection{Snap-On-Release Transition}
+Let $a_k$ be joystick active state ($a_k\in\{0,1\}$). If snap is enabled and transition
+$ a_{k-1}=1 \rightarrow a_k=0$ occurs, the node executes:
+\begin{align}
+x_{\mathrm{ref},k} &\leftarrow x_{\mathrm{ref},k} + S_{k-1}\Delta x_{k^-},\\
+\Delta x_k &\leftarrow 0, \\
+\text{fractional histories} &\leftarrow \emptyset,
+\end{align}
+for both linear and angular channels.
+This makes joystick release recenter the fractional state around the current desired position.
+
+\section{Algorithmic Form (Node Update Loop)}
+At each timer tick:
+\begin{enumerate}[leftmargin=*]
+\item Read latest joystick linear/angular vectors and operation mode.
+\item Update dynamic $\alpha$ (if enabled); refresh GL coefficients if threshold exceeded.
+\item Update gain $K$ (if adaptive gain normalization enabled).
+\item Save previous scaled offsets for derivative computation.
+\item Apply GL fractional integration to linear and angular channels to update $\Delta x_k$.
+\item Update ramp timer from activity condition and compute profile-based scales.
+\item Form scaled offsets and desired state $x_{\mathrm{des},k}=x_{\mathrm{ref},k}+S_k\Delta x_k$.
+\item If snap condition is met (active-to-inactive transition), shift reference by previous scaled offset,
+clear fractional offsets and histories.
+\item If reference drift gate is open, update reference with first-order or fractional mode.
+\item Compute velocities from scaled-offset derivative.
+\item Transform to selected frame (base or end-effector), apply translation/rotation mode gating,
+then apply output velocity scale.
+\item Publish velocity command and optional markers.
+\end{enumerate}
+
+\section{Runtime Parameter Set Used in Current Configuration}
+The active YAML in this workspace uses the following key values:
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.46\linewidth} >{\raggedright\arraybackslash}p{0.44\linewidth}}
+\toprule
+Parameter & Value \\
+\midrule
+$\alpha$ & 0.5 \\
+$K$ (manual, no normalization) & 1.0 \\
+$L$ (memory length) & 50 \\
+$\Delta t$ & 0.01 s \\
+Dynamic alpha & enabled, $\alpha_{\min}=0.1$, $\alpha_{\max}=1.0$, $l_0=0.5$, $l_{\max}=1.0$ \\
+Ramp scaling & enabled via $S^{\text{lin}}_{\max}=2.0$, $S^{\text{ang}}_{\max}=1.0$, $T_{\text{ramp}}=2.5$ s, profile exponential \\
+Snap on release & enabled \\
+Reference drift & enabled, threshold $\tau_{\text{drift}}=0.5$, mode fractional, $\alpha_r=0.5$, $K_r=0.5$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Reproducible Analysis Outcomes (Analysis Folder)}
+An executable analysis pipeline is provided in the package analysis folder:
+\begin{itemize}[leftmargin=*]
+\item model and primitives: \texttt{analysis/fractional\_node\_model.py}
+\item runner: \texttt{analysis/run\_analysis.py}
+\item baseline outputs: \texttt{analysis/results/}
+\end{itemize}
+
+The baseline command is:
+\begin{equation}
+\texttt{/bin/python3 run\_analysis.py}
+\end{equation}
+executed from \texttt{src/controllers/fractional\_teleoperation/analysis}.
+
+Generated outputs include:
+\begin{itemize}[leftmargin=*]
+\item linear fixed-$\alpha$ stability table and spectral-radius plot,
+\item controllability rank and finite-horizon Gramian table,
+\item bounded-input (ISS-style) response table,
+\item hybrid threshold sweep table and sensitivity plot,
+\item $\alpha$--memory sweep table and heatmap.
+\end{itemize}
+
+For the current baseline:
+\begin{itemize}[leftmargin=*]
+\item Spectral radius increases with $\alpha$ and reaches 1.0 at $\alpha=1.0$ (marginal in this discrete linear check), while remaining below 1 for $\alpha \in [0.1,0.9]$.
+\item Controllability rank equals state dimension (49) on the tested fixed-$\alpha$ augmented models, while Gramian conditioning degrades with increasing $\alpha$.
+\item In bounded random-input tests ($\|u\|_\infty \le 1$), peak velocity magnitude decreases strongly with $\alpha$ (about 357 at $\alpha=0.1$ to about 3.29 at $\alpha=1.0$), while reference excursion increases.
+\item In hybrid threshold sweeps, increasing \texttt{joystick\_active\_threshold} from 0.005 to 0.05 increases observed transition count (99 to 274) and snap events (49 to 137), with mean dwell time decreasing (12.0 to 4.36 steps).
+\item In the $\alpha$--memory sweep, peak velocity is primarily $\alpha$-driven (weak dependence on memory length), but reference excursion grows with memory length.
+\end{itemize}
+
+These results are implementation-faithful computational checks, not formal global proofs for the full variable-order hybrid system.
+
+\section{Scientific and Engineering Notes}
+\begin{itemize}[leftmargin=*]
+\item The finite-memory GL update is a practical approximation; sensitivity to memory length should be evaluated experimentally.
+\item With variable $\alpha$, coefficient refresh without history re-identification is computationally efficient but not a strict variable-order discretization.
+\item Perceptual gain normalization can produce large gains at very low $\alpha$ because of $\Gamma(\alpha)$ behavior; practical lower bounds and safety saturation remain essential.
+\item Drift and snap combine to reduce long-term offset accumulation and improve joystick recentering ergonomics.
+\end{itemize}
+
+\section{Scope Boundary}
+This document targets the standalone node implementation only.
+The ROS 2 controller plugin in the same package shares core fractional routines but does not include all node-specific
+behavioral blocks (notably the same drift/snap/ramp orchestration).
+
+\begin{thebibliography}{99}
+
+\bibitem{oldham_spanier_1974}
+K. B. Oldham and J. Spanier,
+\emph{The Fractional Calculus}.
+Academic Press, 1974.
+
+\bibitem{podlubny_1999}
+I. Podlubny,
+\emph{Fractional Differential Equations}.
+Academic Press, 1999.
+
+\bibitem{monje_2010}
+C. A. Monje, Y. Chen, B. M. Vinagre, D. Xue, and V. Feliu,
+\emph{Fractional-Order Systems and Controls: Fundamentals and Applications}.
+Springer, 2010.
+
+\bibitem{diethelm_2010}
+K. Diethelm,
+\emph{The Analysis of Fractional Differential Equations}.
+Springer, 2010.
+
+\bibitem{oustaloup_2000}
+A. Oustaloup, F. Levron, B. Mathieu, and F. M. Nanot,
+``Frequency-band complex noninteger differentiator: characterization and synthesis,''
+\emph{IEEE Transactions on Circuits and Systems I: Fundamental Theory and Applications},
+vol. 47, no. 1, pp. 25--39, 2000.
+
+\bibitem{valerio_sa_da_costa_2013}
+D. Val\'erio and J. S\'a da Costa,
+\emph{An Introduction to Fractional Control}.
+Institution of Engineering and Technology, 2013.
+
+\end{thebibliography}
+
+\end{document}
