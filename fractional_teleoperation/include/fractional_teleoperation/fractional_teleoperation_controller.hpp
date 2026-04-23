@@ -67,6 +67,38 @@ namespace fractional_teleoperation_controller
       variable = node->get_parameter(name).get_value<T>();
     }
 
+    /**
+     * @brief Get parameter from preferred name, fallback to a legacy alias if present.
+     * @tparam T Type of the parameter.
+     * @param preferred_name Preferred parameter name.
+     * @param legacy_name Legacy parameter name.
+     * @param variable Reference to store the parameter value.
+     * @param default_value Default value if neither parameter is set.
+     */
+    template <typename T>
+    void declare_and_get_parameter_alias(
+      const std::string &preferred_name,
+      const std::string &legacy_name,
+      T &variable,
+      const T &default_value)
+    {
+      auto node = get_node();
+      if (node->has_parameter(preferred_name))
+      {
+        variable = node->get_parameter(preferred_name).get_value<T>();
+        return;
+      }
+
+      if (node->has_parameter(legacy_name))
+      {
+        variable = node->get_parameter(legacy_name).get_value<T>();
+        return;
+      }
+
+      node->declare_parameter(preferred_name, default_value);
+      variable = node->get_parameter(preferred_name).get_value<T>();
+    }
+
     void loadParameters();
 
     void setupSubscribers();

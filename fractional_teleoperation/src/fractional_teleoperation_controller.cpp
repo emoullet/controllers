@@ -65,10 +65,10 @@ void FractionalTeleoperationController::loadParameters()
 	declare_and_get_parameters("teleop_cmd_topic", teleop_cmd_topic_, std::string("/teleop_cmd"));
 
 	declare_and_get_parameters("alpha", alpha_, 1.5);
-	declare_and_get_parameters("gain_K", gain_K_, 0.1);
+	declare_and_get_parameters("fractional_offset_gain", gain_K_, 0.1);
 	declare_and_get_parameters("memory_length", memory_length_, 100);
 	declare_and_get_parameters("dt", dt_, 0.01);
-	declare_and_get_parameters("velocity_scale", velocity_scale_, 1.0);
+	declare_and_get_parameters("output_velocity_scale", velocity_scale_, 1.0);
 	declare_and_get_parameters(
 			"global_linear_velocity_saturation", global_linear_velocity_saturation_, 0.0);
 	declare_and_get_parameters(
@@ -101,6 +101,7 @@ void FractionalTeleoperationController::loadParameters()
 	declare_and_get_parameters("alpha_max", alpha_max_, 1.0);
 	declare_and_get_parameters("l_0", l_0_, 0.1);
 	declare_and_get_parameters("l_max", l_max_, 1.0);
+	declare_and_get_parameters("alpha_threshold", alpha_threshold_, 0.001);
 
 	declare_and_get_parameters("enable_marker_visualization", enable_marker_visualization_, true);
 	declare_and_get_parameters("vel_cmd_marker_topic", marker_topic_, std::string("/vel_cmd_marker"));
@@ -320,7 +321,7 @@ bool FractionalTeleoperationController::setupRobotInterface()
 
 	robot_vel_interface_ = robot_interfaces::create_robot_component(robot_type_);
 	if (!robot_vel_interface_ ||
-		  !robot_vel_interface_->initKinematics(robot_description, base_frame_, tool_frame_))
+		  !robot_vel_interface_->initKinematics(robot_description, tool_frame_))
 	{
 		RCLCPP_ERROR(node->get_logger(), "Failed to initialize robot interface.");
 		return false;
@@ -363,6 +364,8 @@ CallbackReturn FractionalTeleoperationController::on_activate(const rclcpp_lifec
 {
 	robot_vel_interface_->assign_loaned_command(command_interfaces_);
 	robot_vel_interface_->assign_loaned_state(state_interfaces_);
+	const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
+	reference_position_linear_ = ee_pose.translation;
 	activatePublishers();
 	return CallbackReturn::SUCCESS;
 }
@@ -532,7 +535,7 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	Eigen::Vector3d joystick_linear(
 			latest_joystick_.linear.x,
 			latest_joystick_.linear.y,
-			latest_joystick_.linear.z);
+			0.0);
 	Eigen::Vector3d joystick_angular(
 			latest_joystick_.angular.x,
 			latest_joystick_.angular.y,

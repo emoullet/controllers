@@ -32,12 +32,13 @@ fractional_teleoperation_node:
 
     joystick_active_threshold: 0.01  # Joystick is considered "active" for ramp scaling when ||joystick_linear|| >= this value
     snap_reference_on_release: true          # Snap x_ref to current x_des when joystick transitions from active to zero    
-    use_reference_drift: true   # Enable slow drift of reference position towards current position to prevent long-term drift
+
+    use_reference_drift: false   # Enable slow drift of reference position towards current position to prevent long-term drift
     reference_drift_joystick_threshold: 0.5  # Drift only when ||joystick_linear|| >= this value
     reference_first_order_rate: 0.5          # Exponential blend rate (1/s), used only in "first_order" reference update mode
     reference_update_mode: "fractional"     # "first_order" or "fractional"
     reference_fractional_alpha: 0.5          # Fractional order used only in "fractional" reference update mode
-    reference_fractional_gain: 0.8           # Gain of the fractional reference update law; not equivalent to first-order rate
+    reference_fractional_gain: 0.5           # Gain of the fractional reference update law; not equivalent to first-order rate
 
     # Output topic configuration
     vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands
