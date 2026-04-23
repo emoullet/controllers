@@ -25,6 +25,11 @@ def generate_launch_description():
             default_value='true',
             description='Open the mouse joystick page automatically'
         ),
+        DeclareLaunchArgument(
+            'log_level',
+            default_value='info',
+            description='Log level for the fractional teleoperation node (debug, info, warn, error)'
+        ),
     ]
 
     # --------------------------------------------------------------------------
@@ -58,6 +63,7 @@ def generate_launch_description():
         name='fractional_teleoperation_node',
         output='screen',
         parameters=[fractional_teleop_config],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
     # --------------------------------------------------------------------------

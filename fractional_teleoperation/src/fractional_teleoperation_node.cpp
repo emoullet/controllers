@@ -616,6 +616,10 @@ namespace fractional_teleoperation_node
     // Snapshot previous tick's scaled offsets for velocity: d(scale*Δx)/dt
     Eigen::Vector3d previous_scaled_offset_linear  = fractional_offset_linear_  * last_linear_scale_;
     Eigen::Vector3d previous_scaled_offset_angular = fractional_offset_angular_ * last_angular_scale_;
+    const Eigen::Vector3d previous_desired_position_linear =
+      previous_reference_position_linear + previous_scaled_offset_linear;
+    const Eigen::Vector3d previous_desired_position_angular =
+      previous_reference_position_angular + previous_scaled_offset_angular;
     // Snapshot pre-update unscaled offsets for snap-on-release
     const Eigen::Vector3d pre_update_offset_linear  = fractional_offset_linear_;
     const Eigen::Vector3d pre_update_offset_angular = fractional_offset_angular_;
@@ -654,12 +658,12 @@ namespace fractional_teleoperation_node
     const double current_linear_scale  = fractional_offset_linear_scale_max_  * ramp_factor;
     const double current_angular_scale = fractional_offset_angular_scale_max_ * ramp_factor;
 
-    const Eigen::Vector3d scaled_offset_linear  = fractional_offset_linear_  * current_linear_scale;
-    const Eigen::Vector3d scaled_offset_angular = fractional_offset_angular_ * current_angular_scale;
+    Eigen::Vector3d scaled_offset_linear  = fractional_offset_linear_  * current_linear_scale;
+    Eigen::Vector3d scaled_offset_angular = fractional_offset_angular_ * current_angular_scale;
 
     // Reconstruct desired position from drifting reference and scaled fractional offset
-    const Eigen::Vector3d desired_position_linear  = reference_position_linear_  + scaled_offset_linear;
-    const Eigen::Vector3d desired_position_angular = reference_position_angular_ + scaled_offset_angular;
+    Eigen::Vector3d desired_position_linear  = reference_position_linear_  + scaled_offset_linear;
+    Eigen::Vector3d desired_position_angular = reference_position_angular_ + scaled_offset_angular;
 
     // Snap reference to current desired position on joystick release (non-zero -> zero transition)
     if (snap_reference_on_release_ && joystick_was_active_ && !joystick_active)
@@ -676,45 +680,6 @@ namespace fractional_teleoperation_node
     joystick_was_active_ = joystick_active;
     last_linear_scale_  = current_linear_scale;
     last_angular_scale_ = current_angular_scale;
-
-    if (use_reference_drift_ &&
-        joystick_linear.norm() >= reference_drift_joystick_threshold_)
-    {
-      if (reference_update_mode_ == "fractional")
-      {
-      reference_position_linear_ = fractional_teleoperation::core::updateReferencePositionFractional(
-        reference_position_linear_,
-        desired_position_linear,
-        reference_linear_history_,
-        reference_gl_coefficients_,
-        memory_length_,
-        dt_,
-        reference_alpha_,
-        reference_fractional_gain_);
-      reference_position_angular_ = fractional_teleoperation::core::updateReferencePositionFractional(
-        reference_position_angular_,
-        desired_position_angular,
-        reference_angular_history_,
-        reference_gl_coefficients_,
-        memory_length_,
-        dt_,
-        reference_alpha_,
-        reference_fractional_gain_);
-      }
-      else
-      {
-      reference_position_linear_ = fractional_teleoperation::core::updateReferencePosition(
-        reference_position_linear_, desired_position_linear, reference_drift_rate_, dt_);
-      reference_position_angular_ = fractional_teleoperation::core::updateReferencePosition(
-        reference_position_angular_, desired_position_angular, reference_drift_rate_, dt_);
-      }
-    }
-
-    if (enable_marker_visualization_) {
-      publishDesiredPositionMarker(desired_position_linear);
-      publishReferencePositionMarker(reference_position_linear_);
-      publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
-    }
 
     Eigen::Vector3d reference_linear_velocity = Eigen::Vector3d::Zero();
     Eigen::Vector3d reference_angular_velocity = Eigen::Vector3d::Zero();
@@ -754,7 +719,27 @@ namespace fractional_teleoperation_node
       const double linear_velocity_norm = cartesian_linear_velocity.norm();
       if (linear_velocity_norm > global_linear_velocity_saturation_)
       {
-        cartesian_linear_velocity *= global_linear_velocity_saturation_ / linear_velocity_norm;
+        RCLCPP_DEBUG(get_logger(), "Linear velocity saturated: %.4f -> %.4f", linear_velocity_norm, global_linear_velocity_saturation_);
+        const double linear_saturation_scale = global_linear_velocity_saturation_ / linear_velocity_norm;
+        // Scale down the entire linear velocity vector to maintain direction while enforcing saturation
+        cartesian_linear_velocity *= linear_saturation_scale;
+
+        // Keep internal position states consistent with the saturated commanded velocity.
+        desired_position_linear = previous_desired_position_linear +
+          linear_saturation_scale * (desired_position_linear - previous_desired_position_linear);
+        // reference_position_linear_ = previous_reference_position_linear +
+        //   linear_saturation_scale * (reference_position_linear_ - previous_reference_position_linear);
+
+        // Reconcile scaled and unscaled offsets after saturation-induced state correction.
+        scaled_offset_linear = desired_position_linear - reference_position_linear_;
+        if (current_linear_scale > 1e-9)
+        {
+          fractional_offset_linear_ = scaled_offset_linear / current_linear_scale;
+        }
+        else
+        {
+          fractional_offset_linear_.setZero();
+        }
       }
     }
 
@@ -763,7 +748,60 @@ namespace fractional_teleoperation_node
       const double angular_velocity_norm = cartesian_angular_velocity.norm();
       if (angular_velocity_norm > global_angular_velocity_saturation_)
       {
-        cartesian_angular_velocity *= global_angular_velocity_saturation_ / angular_velocity_norm;
+        RCLCPP_DEBUG(get_logger(), "Angular velocity saturated: %.4f -> %.4f", angular_velocity_norm, global_angular_velocity_saturation_);
+        const double angular_saturation_scale = global_angular_velocity_saturation_ / angular_velocity_norm;
+        // Scale down the entire angular velocity vector to maintain direction while enforcing saturation
+        cartesian_angular_velocity *= angular_saturation_scale;
+
+        // Keep internal position states consistent with the saturated commanded velocity.
+        desired_position_angular = previous_desired_position_angular +
+          angular_saturation_scale * (desired_position_angular - previous_desired_position_angular);
+        reference_position_angular_ = previous_reference_position_angular +
+          angular_saturation_scale * (reference_position_angular_ - previous_reference_position_angular);
+
+        // Reconcile scaled and unscaled offsets after saturation-induced state correction.
+        scaled_offset_angular = desired_position_angular - reference_position_angular_;
+        if (current_angular_scale > 1e-9)
+        {
+          fractional_offset_angular_ = scaled_offset_angular / current_angular_scale;
+        }
+        else
+        {
+          fractional_offset_angular_.setZero();
+        }
+      }
+    }
+
+    if (use_reference_drift_ &&
+        joystick_linear.norm() >= reference_drift_joystick_threshold_)
+    {
+      if (reference_update_mode_ == "fractional")
+      {
+      reference_position_linear_ = fractional_teleoperation::core::updateReferencePositionFractional(
+        reference_position_linear_,
+        desired_position_linear,
+        reference_linear_history_,
+        reference_gl_coefficients_,
+        memory_length_,
+        dt_,
+        reference_alpha_,
+        reference_fractional_gain_);
+      reference_position_angular_ = fractional_teleoperation::core::updateReferencePositionFractional(
+        reference_position_angular_,
+        desired_position_angular,
+        reference_angular_history_,
+        reference_gl_coefficients_,
+        memory_length_,
+        dt_,
+        reference_alpha_,
+        reference_fractional_gain_);
+      }
+      else
+      {
+      reference_position_linear_ = fractional_teleoperation::core::updateReferencePosition(
+        reference_position_linear_, desired_position_linear, reference_drift_rate_, dt_);
+      reference_position_angular_ = fractional_teleoperation::core::updateReferencePosition(
+        reference_position_angular_, desired_position_angular, reference_drift_rate_, dt_);
       }
     }
 
@@ -775,6 +813,13 @@ namespace fractional_teleoperation_node
     vel_cmd.angular.x = cartesian_angular_velocity.x();
     vel_cmd.angular.y = cartesian_angular_velocity.y();
     vel_cmd.angular.z = cartesian_angular_velocity.z();
+
+
+    if (enable_marker_visualization_) {
+      publishDesiredPositionMarker(desired_position_linear);
+      publishReferencePositionMarker(reference_position_linear_);
+      publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
+    }
 
     vel_cmd_pub_->publish(vel_cmd);
 

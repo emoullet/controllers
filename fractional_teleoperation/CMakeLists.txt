@@ -8,6 +8,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -24,6 +25,7 @@ include_directories(
 add_library(fractional_teleoperation_core STATIC
   src/fractional_teleoperation_core.cpp
 )
+set_target_properties(fractional_teleoperation_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 ament_target_dependencies(fractional_teleoperation_core
   Eigen3
 )
@@ -31,6 +33,7 @@ ament_target_dependencies(fractional_teleoperation_core
 add_library(fractional_teleoperation_ramp STATIC
   src/ramp_profile.cpp
 )
+set_target_properties(fractional_teleoperation_ramp PROPERTIES POSITION_INDEPENDENT_CODE ON)
 ament_target_dependencies(fractional_teleoperation_ramp)
 
 add_library(${PROJECT_NAME} SHARED
@@ -38,6 +41,7 @@ add_library(${PROJECT_NAME} SHARED
 )
 ament_target_dependencies(${PROJECT_NAME}
   rclcpp
+  rclcpp_lifecycle
   controller_interface
   pluginlib
   geometry_msgs

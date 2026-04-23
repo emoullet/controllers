@@ -6,7 +6,7 @@ fractional_teleoperation_node:
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
     output_velocity_scale: 1.0    # Overall output velocity scaling factor
-    global_linear_velocity_saturation: 0.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
+    global_linear_velocity_saturation: 1.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
     global_angular_velocity_saturation: 0.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
     normalize_gain_for_alpha: false         # Normalize K across alpha using v_max-based formulas
@@ -37,7 +37,7 @@ fractional_teleoperation_node:
     reference_first_order_rate: 0.5          # Exponential blend rate (1/s), used only in "first_order" reference update mode
     reference_update_mode: "fractional"     # "first_order" or "fractional"
     reference_fractional_alpha: 0.5          # Fractional order used only in "fractional" reference update mode
-    reference_fractional_gain: 0.5           # Gain of the fractional reference update law; not equivalent to first-order rate
+    reference_fractional_gain: 0.8           # Gain of the fractional reference update law; not equivalent to first-order rate
 
     # Output topic configuration
     vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands

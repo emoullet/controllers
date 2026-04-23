@@ -7,6 +7,8 @@ controller_manager:
 
 fractional_teleoperation_controller:
   ros__parameters:
+    teleop_cmd_topic: "/teleop_cmd"
+
     # Fractional-order parameters
     alpha: 1.5                    # Fractional order (0 < alpha < 2)
                                    # alpha ~ 1.0: near-standard integration
@@ -20,9 +22,29 @@ fractional_teleoperation_controller:
     dt: 0.01                      # Time step in seconds (should match update_rate)
     
     velocity_scale: 1.0           # Overall velocity scaling factor
+    global_linear_velocity_saturation: 0.0
+    global_angular_velocity_saturation: 0.0
     
     # Input frame: "base" or "ee"
     input_frame: "base"
+
+    normalize_gain_for_alpha: true
+    alpha_gain_normalization_mode: "dt"
+    v_max: 1.0
+    t_ref: 1.0
+
+    use_reference_drift: true
+    reference_first_order_rate: 0.15
+    reference_drift_joystick_threshold: 0.0
+    joystick_active_threshold: 0.01
+    snap_reference_on_release: false
+    reference_update_mode: "first_order"
+    reference_fractional_alpha: 0.8
+    reference_fractional_gain: 0.15
+    linear_offset_scale_max: 1.0
+    angular_offset_scale_max: 1.0
+    offset_ramp_time: 0.5
+    offset_ramp_profile: "sigmoid"
     
     # Robot interface configuration
     robot_type: "franka_velocity"
@@ -35,6 +57,7 @@ fractional_teleoperation_controller:
     
     # Dynamic alpha parameters
     use_dynamic_alpha: false         # Enable dynamic alpha adjustment based on joystick norm
+    alpha_min: 0.0
     
     # When dynamic alpha is enabled:
     alpha_max: 1.0                   # Maximum alpha value

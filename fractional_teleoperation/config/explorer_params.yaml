@@ -44,13 +44,35 @@ qontrol_explorer:
 
 fractional_teleoperation_controller:
   ros__parameters:
+    teleop_cmd_topic: "/teleop_cmd"
+
     # Fractional-order parameters
     alpha: 1.5                    # Fractional order (0 < alpha < 2)
     gain_K: 0.1                   # Gain in fractional law D^alpha x_d = K u
     memory_length: 100            # Number of past samples for GL approximation
     dt: 0.01                       # Time step in seconds (should match update_rate)
     velocity_scale: 1.0           # Overall velocity scaling factor
+    global_linear_velocity_saturation: 0.0
+    global_angular_velocity_saturation: 0.0
     input_frame: "base"
+
+    normalize_gain_for_alpha: true
+    alpha_gain_normalization_mode: "dt"
+    v_max: 1.0
+    t_ref: 1.0
+
+    use_reference_drift: true
+    reference_first_order_rate: 0.15
+    reference_drift_joystick_threshold: 0.0
+    joystick_active_threshold: 0.01
+    snap_reference_on_release: false
+    reference_update_mode: "first_order"
+    reference_fractional_alpha: 0.8
+    reference_fractional_gain: 0.15
+    linear_offset_scale_max: 1.0
+    angular_offset_scale_max: 1.0
+    offset_ramp_time: 0.5
+    offset_ramp_profile: "sigmoid"
     
     # Robot interface configuration for explorer
     robot_type: "explorer_velocity"
@@ -74,6 +96,7 @@ fractional_teleoperation_controller:
     
     # Dynamic alpha parameters
     use_dynamic_alpha: false
+    alpha_min: 0.0
     alpha_max: 1.0
     l_0: 0.1
     l_max: 1.0
