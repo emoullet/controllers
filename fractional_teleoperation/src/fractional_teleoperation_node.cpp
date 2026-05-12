@@ -190,6 +190,7 @@ namespace fractional_teleoperation_node
     declare_parameter("angular_offset_scale_max", 1.0);
     declare_parameter("offset_ramp_time", 0.5);
     declare_parameter("offset_ramp_profile", std::string("sigmoid"));
+    declare_parameter("teleop_cmd_input_topic", std::string("/teleop_cmd"));
     declare_parameter("vel_cmd_topic", std::string("/vel_cmd"));
 
     alpha_ = get_parameter("alpha").as_double();
@@ -232,6 +233,7 @@ namespace fractional_teleoperation_node
     fractional_offset_angular_scale_max_ = get_parameter("angular_offset_scale_max").as_double();
     fractional_offset_scale_ramp_time_ = get_parameter("offset_ramp_time").as_double();
     fractional_offset_scale_ramp_profile_ = get_parameter("offset_ramp_profile").as_string();
+    teleop_cmd_input_topic_ = get_parameter("teleop_cmd_input_topic").as_string();
 
     if (reference_drift_rate_ < 0.0)
     {
@@ -388,8 +390,9 @@ namespace fractional_teleoperation_node
   void FractionalTeleoperationNode::declareSubscribers()
   {
     joystick_sub_ = create_subscription<extender_msgs::msg::TeleopCommand>(
-        "/teleop_cmd", 10,
+        teleop_cmd_input_topic_, 10,
         std::bind(&FractionalTeleoperationNode::joystickCallback, this, std::placeholders::_1));
+    RCLCPP_INFO(get_logger(), "Subscribing teleop input on topic: %s", teleop_cmd_input_topic_.c_str());
   }
 
   void FractionalTeleoperationNode::declarePublishers()

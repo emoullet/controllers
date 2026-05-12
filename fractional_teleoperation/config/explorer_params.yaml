@@ -44,15 +44,17 @@ qontrol_explorer:
 
 fractional_teleoperation_controller:
   ros__parameters:
-    teleop_cmd_topic: "/teleop_cmd"
+    # Topic names (configurable for flexibility)
+    teleop_cmd_input_topic: "/teleop_cmd"
+    
     # Fractional-order parameters
-    alpha: 0.5                   # Fractional order (0 < alpha < 2)
+    alpha: 1.                   # Fractional order (0 < alpha < 2)
     fractional_offset_gain: 1.  # Gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
     output_velocity_scale: 1.0    # Overall output velocity scaling factor
-    global_linear_velocity_saturation: 0.5   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
-    global_angular_velocity_saturation: 0.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
+    global_linear_velocity_saturation: 5.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
+    global_angular_velocity_saturation: 5.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
     normalize_gain_for_alpha: false         # Normalize K across alpha using v_max-based formulas
     alpha_gain_normalization_mode: "perceptual"  # "dt" or "perceptual"
@@ -60,11 +62,11 @@ fractional_teleoperation_controller:
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
     
     # Dynamic alpha parameters
-    use_dynamic_alpha: true         # Enable dynamic alpha adjustment based on joystick norm
+    use_dynamic_alpha: false         # Enable dynamic alpha adjustment based on joystick norm
     alpha_min: 0.1          # Minimum alpha value when joystick is below l_0
     alpha_max: 1.0        # Maximum alpha value when joystick is at or above l_max
-    l_0: 0.025              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
-    l_max: 0.05           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
+    l_0: 0.5              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
+    l_max: 1.           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
     alpha_threshold: 0.001  # Minimum alpha used by the dynamic-alpha update logic
 
     # Fractional offset scaling (configurable ramp from 0 to max over scale_ramp_time)
@@ -103,6 +105,8 @@ fractional_teleoperation_controller:
     robot_type: "explorer_velocity"
     base_frame: "base_link"
     tool_frame: "tool0"
+    use_topic_output: true
+    vel_cmd_output_topic: "/fractional_teleoperation_controller/velocity_command"
     command_names:
       - "qontrol_explorer/linear_x"
       - "qontrol_explorer/linear_y"

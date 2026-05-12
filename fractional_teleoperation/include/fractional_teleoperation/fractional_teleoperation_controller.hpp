@@ -10,6 +10,8 @@
 
 #include "controller_interface/controller_interface.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -201,12 +203,21 @@ namespace fractional_teleoperation_controller
     double last_linear_scale_{0.0};
     double last_angular_scale_{0.0};
 
-    std::string teleop_cmd_topic_{"/teleop_cmd"};
+    std::string teleop_cmd_input_topic_{"/teleop_cmd"};
     std::string tool_frame_{"tool0"};
     std::string base_frame_{"base_link"};
 
     /// Subscription for joystick commands
     rclcpp::Subscription<extender_msgs::msg::TeleopCommand>::SharedPtr joystick_sub_;
+
+    /// Subscription for robot description
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr robot_description_sub_;
+    std::string cached_robot_description_;
+
+    void robotDescriptionCallback(const std_msgs::msg::String::SharedPtr msg);
+
+    /// Publisher for velocity command marker visualization
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_cmd_pub_;
 
     /// Publisher for velocity command marker visualization
     rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr
@@ -236,5 +247,7 @@ namespace fractional_teleoperation_controller
 
     std::vector<std::string> command_names_;
     std::string robot_type_{"franka_velocity"};
+    bool use_topic_output_{false};
+    std::string vel_cmd_output_topic_{"/fractional_teleoperation_controller/velocity_command"};
   };
 } // namespace fractional_teleoperation_controller

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <functional>
+#include <thread>
 
 #include "pluginlib/class_list_macros.hpp"
 
@@ -22,6 +24,13 @@ controller_interface::InterfaceConfiguration
 FractionalTeleoperationController::command_interface_configuration() const
 {
 	controller_interface::InterfaceConfiguration config;
+
+	if (use_topic_output_)
+	{
+		config.type = controller_interface::interface_configuration_type::NONE;
+		return config;
+	}
+
 	config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
 
 	if (robot_vel_interface_)
@@ -58,11 +67,23 @@ CallbackReturn FractionalTeleoperationController::on_init()
 
 void FractionalTeleoperationController::loadParameters()
 {
+	// Declare robot_description parameter - will be provided by controller_manager
+	auto node = get_node();
+	if (!node->has_parameter("robot_description"))
+	{
+		node->declare_parameter("robot_description", rclcpp::ParameterValue(std::string("")));
+	}
+
 	declare_and_get_parameters("robot_type", robot_type_, std::string("explorer_velocity"));
 	declare_and_get_parameters("command_names", command_names_, std::vector<std::string>{});
+	declare_and_get_parameters("use_topic_output", use_topic_output_, false);
+	declare_and_get_parameters(
+			"vel_cmd_output_topic",
+			vel_cmd_output_topic_,
+			std::string("/fractional_teleoperation_controller/velocity_command"));
 	declare_and_get_parameters("base_frame", base_frame_, std::string("base_link"));
 	declare_and_get_parameters("tool_frame", tool_frame_, std::string("tool0"));
-	declare_and_get_parameters("teleop_cmd_topic", teleop_cmd_topic_, std::string("/teleop_cmd"));
+	declare_and_get_parameters("teleop_cmd_input_topic", teleop_cmd_input_topic_, std::string("/teleop_cmd"));
 
 	declare_and_get_parameters("alpha", alpha_, 1.5);
 	declare_and_get_parameters("fractional_offset_gain", gain_K_, 0.1);
@@ -260,13 +281,27 @@ void FractionalTeleoperationController::loadParameters()
 void FractionalTeleoperationController::setupSubscribers()
 {
 	joystick_sub_ = get_node()->create_subscription<extender_msgs::msg::TeleopCommand>(
-			teleop_cmd_topic_,
+			teleop_cmd_input_topic_,
 			10,
 			std::bind(&FractionalTeleoperationController::joystickCallback, this, std::placeholders::_1));
+
+	// Subscribe to robot_description topic as fallback if parameter is not available
+	robot_description_sub_ = get_node()->create_subscription<std_msgs::msg::String>(
+			"/robot_description",
+			rclcpp::QoS(rclcpp::KeepLast(1)).transient_local(),
+			std::bind(&FractionalTeleoperationController::robotDescriptionCallback, this, std::placeholders::_1));
 }
 
 void FractionalTeleoperationController::declarePublishers()
 {
+	if (use_topic_output_)
+	{
+		auto node = get_node();
+		vel_cmd_pub_ = node->create_publisher<geometry_msgs::msg::TwistStamped>(
+				vel_cmd_output_topic_,
+				10);
+	}
+
 	if (!enable_marker_visualization_)
 	{
 		return;
@@ -313,9 +348,42 @@ bool FractionalTeleoperationController::setupRobotInterface()
 	std::string robot_description;
 	auto node = get_node();
 
-	if (!node->get_parameter("robot_description", robot_description))
+	// Try to get robot_description from parameter first
+	if (node->has_parameter("robot_description"))
 	{
-		RCLCPP_ERROR(node->get_logger(), "Missing robot_description");
+		if (node->get_parameter("robot_description", robot_description) && !robot_description.empty())
+		{
+			RCLCPP_INFO(node->get_logger(), "Got robot_description from parameter");
+		}
+	}
+
+	// If not available via parameter, use cached version from topic subscription
+	if (robot_description.empty() && !cached_robot_description_.empty())
+	{
+		robot_description = cached_robot_description_;
+		RCLCPP_INFO(node->get_logger(), "Got robot_description from /robot_description topic");
+	}
+
+	// If still empty, wait a bit and retry (controller_manager may publish it shortly)
+	if (robot_description.empty())
+	{
+		RCLCPP_WARN(node->get_logger(),
+			"robot_description not yet available. Waiting for /robot_description topic...");
+		
+		// Give the topic subscription a moment to receive the message
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		
+		if (!cached_robot_description_.empty())
+		{
+			robot_description = cached_robot_description_;
+			RCLCPP_INFO(node->get_logger(), "Successfully got robot_description from /robot_description topic");
+		}
+	}
+
+	if (robot_description.empty())
+	{
+		RCLCPP_ERROR(node->get_logger(),
+			"Failed to get robot_description. Make sure robot_state_publisher is running and publishing to /robot_description topic.");
 		return false;
 	}
 
@@ -362,7 +430,10 @@ CallbackReturn FractionalTeleoperationController::on_configure(const rclcpp_life
 
 CallbackReturn FractionalTeleoperationController::on_activate(const rclcpp_lifecycle::State &)
 {
-	robot_vel_interface_->assign_loaned_command(command_interfaces_);
+	if (!use_topic_output_)
+	{
+		robot_vel_interface_->assign_loaned_command(command_interfaces_);
+	}
 	robot_vel_interface_->assign_loaned_state(state_interfaces_);
 	const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
 	reference_position_linear_ = ee_pose.translation;
@@ -382,6 +453,16 @@ void FractionalTeleoperationController::joystickCallback(
 {
 	latest_joystick_ = msg->twist;
 	mode_ = msg->mode;
+}
+
+void FractionalTeleoperationController::robotDescriptionCallback(
+		const std_msgs::msg::String::SharedPtr msg)
+{
+	cached_robot_description_ = msg->data;
+	RCLCPP_DEBUG(
+		get_node()->get_logger(),
+		"Received robot_description via /robot_description topic (%zu bytes)",
+		cached_robot_description_.size());
 }
 
 void FractionalTeleoperationController::publishMarker(
@@ -527,6 +608,8 @@ controller_interface::return_type FractionalTeleoperationController::update(
 		return controller_interface::return_type::ERROR;
 	}
 
+	robot_vel_interface_->syncState();
+
 	const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
 	current_orientation_ = ee_pose.quaternion;
 
@@ -535,11 +618,23 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	Eigen::Vector3d joystick_linear(
 			latest_joystick_.linear.x,
 			latest_joystick_.linear.y,
-			0.0);
+			latest_joystick_.linear.z);
 	Eigen::Vector3d joystick_angular(
 			latest_joystick_.angular.x,
 			latest_joystick_.angular.y,
 			latest_joystick_.angular.z);
+
+	RCLCPP_DEBUG(
+			get_node()->get_logger(),
+			"joystick input - linear: [%.6f, %.6f, %.6f], angular: [%.6f, %.6f, %.6f]",
+			joystick_linear.x(),
+			joystick_linear.y(),
+			joystick_linear.z(),
+			joystick_angular.x(),
+			joystick_angular.y(),
+			joystick_angular.z());
+
+	
 
 	const Eigen::Vector3d previous_reference_position_linear = reference_position_linear_;
 	const Eigen::Vector3d previous_reference_position_angular = reference_position_angular_;
@@ -759,12 +854,38 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	latest_vel_cmd.angular[1] = cartesian_angular_velocity.y();
 	latest_vel_cmd.angular[2] = cartesian_angular_velocity.z();
 
+	RCLCPP_DEBUG(get_node()->get_logger(),
+		"latest_vel_cmd - linear: [%.6f, %.6f, %.6f], angular: [%.6f, %.6f, %.6f]",
+		latest_vel_cmd.linear[0], latest_vel_cmd.linear[1], latest_vel_cmd.linear[2],
+		latest_vel_cmd.angular[0], latest_vel_cmd.angular[1], latest_vel_cmd.angular[2]);
+
 	if (enable_marker_visualization_)
 	{
 		publishDesiredPositionMarker(desired_linear);
 		publishReferencePositionMarker(reference_position_linear_);
 		publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
 		publishMarker(latest_vel_cmd, desired_linear);
+	}
+
+	if (use_topic_output_)
+	{
+		if (!vel_cmd_pub_)
+		{
+			RCLCPP_ERROR(get_node()->get_logger(), "Velocity command publisher is not initialized.");
+			return controller_interface::return_type::ERROR;
+		}
+
+		geometry_msgs::msg::TwistStamped msg;
+		msg.header.stamp = get_node()->now();
+		msg.header.frame_id = base_frame_;
+		msg.twist.linear.x = latest_vel_cmd.linear[0];
+		msg.twist.linear.y = latest_vel_cmd.linear[1];
+		msg.twist.linear.z = latest_vel_cmd.linear[2];
+		msg.twist.angular.x = latest_vel_cmd.angular[0];
+		msg.twist.angular.y = latest_vel_cmd.angular[1];
+		msg.twist.angular.z = latest_vel_cmd.angular[2];
+		vel_cmd_pub_->publish(msg);
+		return controller_interface::return_type::OK;
 	}
 
 	if (robot_vel_interface_->setCommand(latest_vel_cmd))

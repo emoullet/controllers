@@ -44,7 +44,7 @@ qontrol_explorer:
 
 fractional_teleoperation_controller:
   ros__parameters:
-    teleop_cmd_topic: "/teleop_cmd"
+    teleop_cmd_input_topic: "/teleop_cmd"
 
     # Fractional-order parameters
     alpha: 1.5                    # Fractional order (0 < alpha < 2)

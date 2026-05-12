@@ -156,7 +156,7 @@ def generate_launch_description():
         robot_hardware,
         delayed_spawner_qontrol,
         start_sandbox_event,
-        # mouse_joystick_node,
+        #mouse_joystick_node,
     ]
 
     return LaunchDescription(declared_arguments + nodes_to_start)

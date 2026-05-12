@@ -63,6 +63,7 @@ namespace fractional_teleoperation_node
     double fractional_offset_angular_scale_max_;
     double fractional_offset_scale_ramp_time_;
     std::string fractional_offset_scale_ramp_profile_;
+    std::string teleop_cmd_input_topic_;
 
     // Dynamic alpha parameters
     bool use_dynamic_alpha_;

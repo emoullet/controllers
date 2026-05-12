@@ -70,7 +70,7 @@ def generate_launch_description():
     # 4. Launch Description
     # --------------------------------------------------------------------------
     nodes_to_start = [
-        mouse_joystick_node,
+        #mouse_joystick_node,
         fractional_teleoperation_node,
     ]
 

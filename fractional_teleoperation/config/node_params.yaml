@@ -1,5 +1,10 @@
 fractional_teleoperation_node:
   ros__parameters:
+  
+    # Topic configuration
+    teleop_cmd_input_topic: "/teleop_cmd"  # Topic to subscribe teleoperation commands
+    vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands
+
     # Fractional-order parameters
     alpha: 0.5                   # Fractional order (0 < alpha < 2)
     fractional_offset_gain: 1.  # Gain in fractional law D^alpha x_d = K u
@@ -40,8 +45,6 @@ fractional_teleoperation_node:
     reference_fractional_alpha: 0.5          # Fractional order used only in "fractional" reference update mode
     reference_fractional_gain: 0.5           # Gain of the fractional reference update law; not equivalent to first-order rate
 
-    # Output topic configuration
-    vel_cmd_topic: "/vel_cmd"     # Topic to publish velocity commands
     
     # Marker visualization
     enable_marker_visualization: true

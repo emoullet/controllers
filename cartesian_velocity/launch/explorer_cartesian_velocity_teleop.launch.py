@@ -80,12 +80,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'render_engine',
-            description='Gazebo render engine (ogre or ogre2)'
+            description='Gazebo render engine (ogre or ogre2)',
             default_value='ogre',
         ),
         DeclareLaunchArgument(
-            default_value='true',
             'software_rendering',
+            default_value='true',
             description='Force software OpenGL rendering for Gazebo GUI'
         )
     ]
