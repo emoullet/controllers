@@ -15,7 +15,7 @@ def generate_launch_description():
     fractional_tele_share_dir = get_package_share_directory('fractional_teleoperation')
     
     # Config files
-    hand_joystick_config = os.path.join(hand_joystick_share_dir, 'config', 'default_parameters.yaml')
+    hand_joystick_config = os.path.join(hand_joystick_share_dir, 'config', 'explorer_hand_parameters.yaml')
     hand_landmarks_config = os.path.join(mediapipe_share_dir, 'config', 'hand_landmarks_node.yaml')
     video_config = os.path.join(offline_media_share_dir, 'config', 'video_publisher.yaml')
     fractional_tele_config = os.path.join(fractional_tele_share_dir, 'config', 'franka_params.yaml')

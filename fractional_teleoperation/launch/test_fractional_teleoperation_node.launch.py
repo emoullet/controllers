@@ -97,7 +97,7 @@ def generate_launch_description():
     # 4. Hand Joystick Interface Node
     # --------------------------------------------------------------------------
     hand_joystick_config_file = PathJoinSubstitution([
-        FindPackageShare("hand_joystick_interfaces"), "config", "default_parameters.yaml"
+        FindPackageShare("hand_joystick_interfaces"), "config", "explorer_hand_parameters.yaml"
     ])
 
     hand_joystick_node = Node(
