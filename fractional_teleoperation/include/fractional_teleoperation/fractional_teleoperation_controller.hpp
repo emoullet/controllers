@@ -165,6 +165,8 @@ namespace fractional_teleoperation_controller
     std::string adaptive_gain_mode_{"dt"};
     double v_max_{1.0};
     double t_ref_{1.0};
+    double k_0_{1.0};
+    double k_1_{1.0};
 
     bool use_reference_drift_{true};
     double reference_drift_rate_{0.15};

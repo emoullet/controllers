@@ -51,6 +51,8 @@ namespace fractional_teleoperation_node
     std::string adaptive_gain_mode_;
     double v_max_;
     double t_ref_;
+    double k_0_;
+    double k_1_;
     bool use_reference_drift_;
     double reference_drift_rate_;
     double reference_drift_joystick_threshold_;

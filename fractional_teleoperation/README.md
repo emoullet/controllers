@@ -37,7 +37,7 @@ The shared core contains the common math and control post-processing used by bot
 - Fractional integration update
 - Desired-position to velocity conversion
 - Input-frame transform (`base` / `ee`), mode filtering, velocity scaling
-- Adaptive gain computation (`dt` or `perceptual` mode)
+- Adaptive gain computation (`dt`, `perceptual`, or `geometric_transition` mode)
 
 This keeps behavior consistent between the node and controller paths.
 
@@ -76,8 +76,12 @@ For the node, `normalize_gain_for_alpha` enables gain adaptation:
   - `K = v_max * dt^(1 - alpha)`
 - `alpha_gain_normalization_mode: perceptual`
   - `K = v_max * Gamma(alpha) / t_ref^(alpha - 1)`
+- `alpha_gain_normalization_mode: geometric_transition`
+  - `K = k_0^(1 - alpha) * k_1^alpha`
+  - `k_0` is the position-amplification endpoint and `k_1` is the velocity-gain endpoint
 
 (`Gamma(alpha)` uses a safe lower bound for very small `alpha`.)
+(`k_0` and `k_1` must stay strictly positive.)
 
 ## Node Parameter Reference
 
@@ -115,14 +119,17 @@ When enabled, `fractional_offset_gain` is automatically recomputed from `v_max` 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `normalize_gain_for_alpha` | bool | `false` | Enable automatic gain recomputation. When `true`, the YAML value of `fractional_offset_gain` is ignored at runtime. |
-| `alpha_gain_normalization_mode` | string | `"perceptual"` | Formula used to compute K. `"dt"`: `K = v_max × dt^(1−alpha)`. `"perceptual"`: `K = v_max × Γ(alpha) / t_ref^(alpha−1)`. The perceptual mode keeps the perceived impulse-response amplitude consistent across alpha values. |
+| `alpha_gain_normalization_mode` | string | `"perceptual"` | Formula used to compute K. `"dt"`: `K = v_max × dt^(1−alpha)`. `"perceptual"`: `K = v_max × Γ(alpha) / t_ref^(alpha−1)`. `"geometric_transition"`: `K = k_0^(1−alpha) × k_1^alpha`. The geometric mode transitions from a position-amplification endpoint at low alpha toward a velocity-gain endpoint at high alpha. |
 | `v_max` | float | 1.0 | Maximum commanded velocity (m/s) when the joystick is fully saturated. The primary speed-range knob when adaptive gain is active. |
 | `t_ref` | float | 0.2 | Reference time (s) for the perceptual gain formula. Represents the time horizon over which the velocity response is normalised. Only used when `alpha_gain_normalization_mode: "perceptual"`. |
+| `k_0` | float | 1.0 | Positive position-amplification endpoint used only when `alpha_gain_normalization_mode: "geometric_transition"`. For `alpha = 0`, the adaptive gain tends to `k_0`. |
+| `k_1` | float | 1.0 | Positive velocity-gain endpoint used only when `alpha_gain_normalization_mode: "geometric_transition"`. For `alpha = 1`, the adaptive gain tends to `k_1`. |
 
 **Tuning guidance:**
 - Enable adaptive gain when you vary `alpha` (statically or via dynamic alpha) and want velocity amplitude to stay consistent across configurations.
 - Set `v_max` to a safe low value first and increase gradually. This is the most direct speed safety limit.
 - `t_ref` rarely needs adjustment; values in 0.1–0.5 s cover most setups.
+- Use `geometric_transition` when you want dynamic alpha to interpolate continuously between two hand-tuned gains; at `alpha = 0.5`, the gain becomes `sqrt(k_0 * k_1)`.
 
 ---
 
@@ -254,7 +261,7 @@ The scale for each component follows a selected ramp profile from 0 to its maxim
 1. **Set `dt`** to match the actual timer frequency (e.g. `0.01` for 100 Hz).
 2. **Disable adaptive gain** (`normalize_gain_for_alpha: false`) and set `fractional_offset_gain` manually to get rough motion at moderate joystick deflection.
 3. **Tune `alpha`**: start at `1.0` (standard integrator), lower toward `0.5–0.8` for smoother, more persistent motion.
-4. **Enable adaptive gain** (`normalize_gain_for_alpha: true`, mode `"dt"` or `"perceptual"`) once the alpha range is settled, replacing manual `fractional_offset_gain` with `v_max` set to the desired maximum speed.
+4. **Enable adaptive gain** (`normalize_gain_for_alpha: true`, mode `"dt"`, `"perceptual"`, or `"geometric_transition"`) once the alpha range is settled, replacing manual `fractional_offset_gain` with `v_max` set to the desired maximum speed or `k_0`/`k_1` set to the desired transition endpoints.
 5. **Tune reference drift**: set `use_reference_drift: true`, mode `"first_order"`, and adjust `reference_first_order_rate` until the joystick return-to-centre timing feels natural.
 6. *(Optional)* Enable `use_dynamic_alpha` for variable-sensitivity control across the joystick range.
 

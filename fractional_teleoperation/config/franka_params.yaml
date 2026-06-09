@@ -32,6 +32,8 @@ fractional_teleoperation_controller:
     alpha_gain_normalization_mode: "dt"
     v_max: 1.0
     t_ref: 1.0
+    k_0: 1.0
+    k_1: 1.0
 
     use_reference_drift: true
     reference_first_order_rate: 0.15

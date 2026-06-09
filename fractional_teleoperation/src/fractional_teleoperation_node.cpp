@@ -39,10 +39,12 @@ namespace fractional_teleoperation_node
 
     // Validate gain normalization mode
     std::transform(adaptive_gain_mode_.begin(), adaptive_gain_mode_.end(), adaptive_gain_mode_.begin(), ::tolower);
-    if (adaptive_gain_mode_ != "dt" && adaptive_gain_mode_ != "perceptual")
+    if (
+        adaptive_gain_mode_ != "dt" && adaptive_gain_mode_ != "perceptual" &&
+        adaptive_gain_mode_ != "geometric_transition")
     {
       RCLCPP_WARN(get_logger(),
-                  "Invalid alpha_gain_normalization_mode '%s'. Use 'dt' or 'perceptual'. Defaulting to 'dt'.",
+                  "Invalid alpha_gain_normalization_mode '%s'. Use 'dt', 'perceptual', or 'geometric_transition'. Defaulting to 'dt'.",
                   adaptive_gain_mode_.c_str());
       adaptive_gain_mode_ = "dt";
     }
@@ -63,6 +65,22 @@ namespace fractional_teleoperation_node
                   "Invalid t_ref=%.3f. Must be > 0. Using default 1.0 s.",
                   t_ref_);
       t_ref_ = 1.0;
+    }
+
+    if (k_0_ <= 0.0)
+    {
+      RCLCPP_WARN(get_logger(),
+                  "Invalid k_0=%.3f. Must be > 0. Using default 1.0.",
+                  k_0_);
+      k_0_ = 1.0;
+    }
+
+    if (k_1_ <= 0.0)
+    {
+      RCLCPP_WARN(get_logger(),
+                  "Invalid k_1=%.3f. Must be > 0. Using default 1.0.",
+                  k_1_);
+      k_1_ = 1.0;
     }
 
     // Recompute gain with validated parameters
@@ -115,6 +133,11 @@ namespace fractional_teleoperation_node
       {
         RCLCPP_INFO(get_logger(), "  t_ref: %.3f s", t_ref_);
       }
+      else if (adaptive_gain_mode_ == "geometric_transition")
+      {
+        RCLCPP_INFO(get_logger(), "  k_0: %.6f", k_0_);
+        RCLCPP_INFO(get_logger(), "  k_1: %.6f", k_1_);
+      }
     }
     
     // Log dynamic alpha parameters if enabled
@@ -162,6 +185,8 @@ namespace fractional_teleoperation_node
     declare_parameter("alpha_gain_normalization_mode", std::string("dt"));
     declare_parameter("v_max", 1.0);
     declare_parameter("t_ref", 1.0);
+    declare_parameter("k_0", 1.0);
+    declare_parameter("k_1", 1.0);
     declare_parameter("enable_marker_visualization", true);
     declare_parameter("vel_cmd_marker_topic", std::string("/vel_cmd_marker"));
     declare_parameter("vel_cmd_marker_frame_id", std::string("base_link"));
@@ -205,6 +230,8 @@ namespace fractional_teleoperation_node
     adaptive_gain_mode_ = get_parameter("alpha_gain_normalization_mode").as_string();
     v_max_ = get_parameter("v_max").as_double();
     t_ref_ = get_parameter("t_ref").as_double();
+    k_0_ = get_parameter("k_0").as_double();
+    k_1_ = get_parameter("k_1").as_double();
     enable_marker_visualization_ = get_parameter("enable_marker_visualization").as_bool();
     marker_topic_ = get_parameter("vel_cmd_marker_topic").as_string();
     marker_frame_id_ = get_parameter("vel_cmd_marker_frame_id").as_string();
@@ -439,7 +466,7 @@ namespace fractional_teleoperation_node
     }
 
     gain_K_ = fractional_teleoperation::core::computeAdaptiveGainK(
-        current_alpha_, v_max_, t_ref_, dt_, adaptive_gain_mode_);
+      current_alpha_, v_max_, t_ref_, dt_, k_0_, k_1_, adaptive_gain_mode_);
   }
 
   void FractionalTeleoperationNode::joystickCallback(

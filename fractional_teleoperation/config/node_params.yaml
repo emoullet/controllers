@@ -15,9 +15,11 @@ fractional_teleoperation_node:
     global_angular_velocity_saturation: 0.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
     normalize_gain_for_alpha: false         # Normalize K across alpha using v_max-based formulas
-    alpha_gain_normalization_mode: "perceptual"  # "dt" or "perceptual"
+    alpha_gain_normalization_mode: "perceptual"  # "dt", "perceptual", or "geometric_transition"
     v_max: 1.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
+    k_0: 1.0                      # Position-amplification endpoint used by geometric_transition
+    k_1: 1.0                      # Velocity-gain endpoint used by geometric_transition
     
     # Dynamic alpha parameters
     use_dynamic_alpha: true         # Enable dynamic alpha adjustment based on joystick norm

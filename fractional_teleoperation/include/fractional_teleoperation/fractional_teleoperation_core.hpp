@@ -48,6 +48,8 @@ double computeAdaptiveGainK(
     double v_max,
     double t_ref,
     double dt,
+    double k_0,
+    double k_1,
     const std::string & adaptive_gain_mode);
 
 void updateDynamicAlphaAndCoefficients(

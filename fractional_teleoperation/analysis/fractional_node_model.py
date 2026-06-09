@@ -21,6 +21,8 @@ class NodeAnalysisParams:
     alpha_gain_normalization_mode: str = "perceptual"
     v_max: float = 1.0
     t_ref: float = 0.2
+    k_0: float = 1.0
+    k_1: float = 1.0
     use_dynamic_alpha: bool = True
     alpha_min: float = 0.1
     alpha_max: float = 1.0
@@ -79,6 +81,8 @@ def compute_dynamic_alpha(
 
 
 def compute_adaptive_gain(alpha: float, params: NodeAnalysisParams) -> float:
+    if params.alpha_gain_normalization_mode == "geometric_transition":
+        return params.k_0 ** (1.0 - alpha) * params.k_1 ** alpha
     if params.alpha_gain_normalization_mode == "perceptual":
         alpha_gamma = max(alpha, 1e-3)
         return params.v_max * math.gamma(alpha_gamma) / (params.t_ref ** (alpha_gamma - 1.0))
@@ -174,6 +178,8 @@ def sanitize_params(params: NodeAnalysisParams) -> NodeAnalysisParams:
     p.dt = max(1e-6, p.dt)
     p.v_max = max(1e-6, p.v_max)
     p.t_ref = max(1e-6, p.t_ref)
+    p.k_0 = max(1e-6, p.k_0)
+    p.k_1 = max(1e-6, p.k_1)
     p.reference_first_order_rate = max(0.0, p.reference_first_order_rate)
     p.reference_drift_joystick_threshold = max(0.0, p.reference_drift_joystick_threshold)
     p.joystick_active_threshold = max(0.0, p.joystick_active_threshold)
@@ -181,7 +187,7 @@ def sanitize_params(params: NodeAnalysisParams) -> NodeAnalysisParams:
     p.angular_offset_scale_max = max(0.0, p.angular_offset_scale_max)
     p.offset_ramp_time = max(0.0, p.offset_ramp_time)
     p.alpha_gain_normalization_mode = p.alpha_gain_normalization_mode.lower()
-    if p.alpha_gain_normalization_mode not in {"dt", "perceptual"}:
+    if p.alpha_gain_normalization_mode not in {"dt", "perceptual", "geometric_transition"}:
         p.alpha_gain_normalization_mode = "dt"
     p.reference_update_mode = p.reference_update_mode.lower()
     if p.reference_update_mode not in {"first_order", "fractional"}:

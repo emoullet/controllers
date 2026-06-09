@@ -101,6 +101,8 @@ void FractionalTeleoperationController::loadParameters()
 			"alpha_gain_normalization_mode", adaptive_gain_mode_, std::string("dt"));
 	declare_and_get_parameters("v_max", v_max_, 1.0);
 	declare_and_get_parameters("t_ref", t_ref_, 1.0);
+	declare_and_get_parameters("k_0", k_0_, 1.0);
+	declare_and_get_parameters("k_1", k_1_, 1.0);
 
 	declare_and_get_parameters("use_reference_drift", use_reference_drift_, true);
 	declare_and_get_parameters("reference_first_order_rate", reference_drift_rate_, 0.15);
@@ -156,7 +158,9 @@ void FractionalTeleoperationController::loadParameters()
 			adaptive_gain_mode_.end(),
 			adaptive_gain_mode_.begin(),
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	if (adaptive_gain_mode_ != "dt" && adaptive_gain_mode_ != "perceptual")
+	if (
+			adaptive_gain_mode_ != "dt" && adaptive_gain_mode_ != "perceptual" &&
+			adaptive_gain_mode_ != "geometric_transition")
 	{
 		RCLCPP_WARN(
 				get_node()->get_logger(),
@@ -200,6 +204,22 @@ void FractionalTeleoperationController::loadParameters()
 	if (t_ref_ <= 0.0)
 	{
 		t_ref_ = 1.0;
+	}
+	if (k_0_ <= 0.0)
+	{
+		RCLCPP_WARN(
+				get_node()->get_logger(),
+				"Invalid k_0=%.3f. Must be > 0. Using default 1.0.",
+				k_0_);
+		k_0_ = 1.0;
+	}
+	if (k_1_ <= 0.0)
+	{
+		RCLCPP_WARN(
+				get_node()->get_logger(),
+				"Invalid k_1=%.3f. Must be > 0. Using default 1.0.",
+				k_1_);
+		k_1_ = 1.0;
 	}
 
 	if (reference_alpha_ <= 0.0 || reference_alpha_ >= 2.0)
@@ -411,6 +431,8 @@ void FractionalTeleoperationController::updateGainK()
 			v_max_,
 			t_ref_,
 			dt_,
+			k_0_,
+			k_1_,
 			adaptive_gain_mode_);
 }
 
@@ -673,6 +695,7 @@ controller_interface::return_type FractionalTeleoperationController::update(
 			dt_,
 			current_alpha_,
 			gain_K_);
+			
 	desired_position_angular_ = fractional_teleoperation::core::applyFractionalIntegration(
 			joystick_angular,
 			angular_history_,

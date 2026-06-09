@@ -48,7 +48,7 @@ fractional_teleoperation_controller:
     teleop_cmd_input_topic: "/teleop_cmd"
     
     # Fractional-order parameters
-    alpha: 1.                   # Fractional order (0 < alpha < 2)
+    alpha: 0.                   # Fractional order (0 < alpha < 2)
     fractional_offset_gain: 1.  # Gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
     dt: 0.01                      # Time step in seconds (100 Hz update rate)
@@ -56,10 +56,12 @@ fractional_teleoperation_controller:
     global_linear_velocity_saturation: 5.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
     global_angular_velocity_saturation: 5.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
-    normalize_gain_for_alpha: false         # Normalize K across alpha using v_max-based formulas
-    alpha_gain_normalization_mode: "perceptual"  # "dt" or "perceptual"
+    normalize_gain_for_alpha: true         # Normalize K across alpha using v_max-based formulas
+    alpha_gain_normalization_mode: "geometric_transition"  # "dt", "perceptual", or "geometric_transition"
     v_max: 1.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
+    k_0: 2.0                     # Position-amplification endpoint used by geometric_transition
+    k_1: 1.0                      # Velocity-gain endpoint used by geometric_transition
     
     # Dynamic alpha parameters
     use_dynamic_alpha: false         # Enable dynamic alpha adjustment based on joystick norm

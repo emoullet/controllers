@@ -112,8 +112,16 @@ double computeAdaptiveGainK(
     double v_max,
     double t_ref,
     double dt,
+    double k_0,
+    double k_1,
     const std::string & adaptive_gain_mode)
 {
+  if (adaptive_gain_mode == "geometric_transition")
+  {
+    return std::pow(k_0, 1.0 - current_alpha) * std::pow(k_1, current_alpha);
+
+  }
+
   if (adaptive_gain_mode == "perceptual")
   {
     const double alpha_for_gamma = std::max(current_alpha, 1e-3);
