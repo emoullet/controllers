@@ -13,6 +13,48 @@ namespace fractional_teleoperation_controller
 {
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
+namespace
+{
+geometry_msgs::msg::Point toPoint(const Eigen::Vector3d &value)
+{
+	geometry_msgs::msg::Point point;
+	point.x = value.x();
+	point.y = value.y();
+	point.z = value.z();
+	return point;
+}
+
+visualization_msgs::msg::Marker createMarkerBase(
+		const rclcpp::Time &stamp,
+		const std::string &frame_id,
+		const std::string &ns,
+		int32_t type)
+{
+	visualization_msgs::msg::Marker marker_msg;
+	marker_msg.header.stamp = stamp;
+	marker_msg.header.frame_id = frame_id;
+	marker_msg.ns = ns;
+	marker_msg.id = 0;
+	marker_msg.type = type;
+	marker_msg.action = visualization_msgs::msg::Marker::ADD;
+	return marker_msg;
+}
+
+robot_interfaces::CartesianVelocity toCartesianVelocity(
+		const Eigen::Vector3d &linear,
+		const Eigen::Vector3d &angular)
+{
+	robot_interfaces::CartesianVelocity vel_cmd;
+	vel_cmd.linear[0] = linear.x();
+	vel_cmd.linear[1] = linear.y();
+	vel_cmd.linear[2] = linear.z();
+	vel_cmd.angular[0] = angular.x();
+	vel_cmd.angular[1] = angular.y();
+	vel_cmd.angular[2] = angular.z();
+	return vel_cmd;
+}
+}  // namespace
+
 FractionalTeleoperationController::FractionalTeleoperationController()
 : controller_interface::ControllerInterface()
 {
@@ -66,6 +108,13 @@ CallbackReturn FractionalTeleoperationController::on_init()
 }
 
 void FractionalTeleoperationController::loadParameters()
+{
+	declareParameters();
+	validateAndNormalizeParameters();
+	resetControllerState();
+}
+
+void FractionalTeleoperationController::declareParameters()
 {
 	// Declare robot_description parameter - will be provided by controller_manager
 	auto node = get_node();
@@ -143,7 +192,16 @@ void FractionalTeleoperationController::loadParameters()
 			"reference_position_marker_scale", reference_position_marker_scale_, 0.04);
 	declare_and_get_parameters(
 			"joystick_linear_marker_topic", joystick_linear_marker_topic_, std::string("/joystick_linear_marker"));
+	declare_and_get_parameters(
+			"ee_pose_translation_marker_topic",
+			ee_pose_translation_marker_topic_,
+			std::string("/ee_pose_translation_marker"));
+	declare_and_get_parameters(
+			"ee_pose_translation_marker_scale", ee_pose_translation_marker_scale_, 0.04);
+}
 
+void FractionalTeleoperationController::validateAndNormalizeParameters()
+{
 	if (alpha_ <= 0.0 || alpha_ >= 2.0)
 	{
 		RCLCPP_WARN(
@@ -167,6 +225,13 @@ void FractionalTeleoperationController::loadParameters()
 				"Invalid alpha_gain_normalization_mode '%s'. Defaulting to 'dt'.",
 				adaptive_gain_mode_.c_str());
 		adaptive_gain_mode_ = "dt";
+	}
+	else
+	{
+		RCLCPP_INFO(
+				get_node()->get_logger(),
+				"Using alpha_gain_normalization_mode '%s'.",
+				adaptive_gain_mode_.c_str());
 	}
 
 	std::transform(
@@ -213,11 +278,11 @@ void FractionalTeleoperationController::loadParameters()
 				k_0_);
 		k_0_ = 1.0;
 	}
-	if (k_1_ <= 0.0)
+	if (k_1_ < 0.0)
 	{
 		RCLCPP_WARN(
 				get_node()->get_logger(),
-				"Invalid k_1=%.3f. Must be > 0. Using default 1.0.",
+				"Invalid k_1=%.3f. Must be >= 0. Using default 1.0.",
 				k_1_);
 		k_1_ = 1.0;
 	}
@@ -271,7 +336,11 @@ void FractionalTeleoperationController::loadParameters()
 	{
 		fractional_offset_scale_ramp_profile_ = "sigmoid";
 	}
+}
 
+
+void FractionalTeleoperationController::resetControllerState()
+{
 	current_alpha_ = use_dynamic_alpha_ ? alpha_min_ : alpha_;
 	last_alpha_ = current_alpha_;
 	updateGainK();
@@ -283,8 +352,8 @@ void FractionalTeleoperationController::loadParameters()
 
 	latest_joystick_ = geometry_msgs::msg::Twist();
 	mode_ = extender_msgs::msg::TeleopCommand::BOTH;
-	desired_position_linear_.setZero();
-	desired_position_angular_.setZero();
+	desired_offset_linear_.setZero();
+	desired_offset_angular_.setZero();
 	reference_position_linear_.setZero();
 	reference_position_angular_.setZero();
 	current_orientation_ = Eigen::Quaterniond::Identity();
@@ -335,6 +404,8 @@ void FractionalTeleoperationController::declarePublishers()
 			node->create_publisher<visualization_msgs::msg::Marker>(reference_position_marker_topic_, 10);
 	joystick_linear_marker_pub_ =
 			node->create_publisher<visualization_msgs::msg::Marker>(joystick_linear_marker_topic_, 10);
+	ee_pose_translation_marker_pub_ =
+			node->create_publisher<visualization_msgs::msg::Marker>(ee_pose_translation_marker_topic_, 10);
 }
 
 void FractionalTeleoperationController::activatePublishers()
@@ -348,6 +419,7 @@ void FractionalTeleoperationController::activatePublishers()
 	desired_position_marker_pub_->on_activate();
 	reference_position_marker_pub_->on_activate();
 	joystick_linear_marker_pub_->on_activate();
+	ee_pose_translation_marker_pub_->on_activate();
 }
 
 void FractionalTeleoperationController::deactivatePublishers()
@@ -361,6 +433,7 @@ void FractionalTeleoperationController::deactivatePublishers()
 	desired_position_marker_pub_->on_deactivate();
 	reference_position_marker_pub_->on_deactivate();
 	joystick_linear_marker_pub_->on_deactivate();
+	ee_pose_translation_marker_pub_->on_deactivate();
 }
 
 bool FractionalTeleoperationController::setupRobotInterface()
@@ -434,6 +507,294 @@ void FractionalTeleoperationController::updateGainK()
 			k_0_,
 			k_1_,
 			adaptive_gain_mode_);
+	RCLCPP_INFO(get_node()->get_logger(), "Updated gain_K=%.3f for current_alpha=%.3f", gain_K_, current_alpha_);
+}
+
+void FractionalTeleoperationController::readJoystickInput(
+		Eigen::Vector3d &joystick_linear,
+		Eigen::Vector3d &joystick_angular) const
+{
+	joystick_linear = Eigen::Vector3d(
+			latest_joystick_.linear.x,
+			latest_joystick_.linear.y,
+			latest_joystick_.linear.z);
+	joystick_angular = Eigen::Vector3d(
+			latest_joystick_.angular.x,
+			latest_joystick_.angular.y,
+			latest_joystick_.angular.z);
+}
+
+void FractionalTeleoperationController::integrateDesiredOffsets(
+		const Eigen::Vector3d &joystick_linear,
+		const Eigen::Vector3d &joystick_angular)
+{
+	RCLCPP_INFO(get_node()->get_logger(), "Integrating desired offsets with current_alpha=%.3f, gain_K=%.3f", current_alpha_, gain_K_);
+	desired_offset_linear_ = fractional_teleoperation::core::applyFractionalIntegration(
+			joystick_linear,
+			linear_history_,
+			gl_coefficients_,
+			memory_length_,
+			dt_,
+			current_alpha_,
+			gain_K_);
+	RCLCPP_INFO(get_node()->get_logger(), "Desired offset linear: [%.3f, %.3f, %.3f]", desired_offset_linear_.x(), desired_offset_linear_.y(), desired_offset_linear_.z());
+
+	desired_offset_angular_ = fractional_teleoperation::core::applyFractionalIntegration(
+			joystick_angular,
+			angular_history_,
+			gl_coefficients_,
+			memory_length_,
+			dt_,
+			current_alpha_,
+			gain_K_);
+}
+
+void FractionalTeleoperationController::updateJoystickActivityDuration(bool joystick_active)
+{
+	if (joystick_active)
+	{
+		joystick_active_duration_ += dt_;
+	}
+	else
+	{
+		joystick_active_duration_ = 0.0;
+	}
+}
+
+void FractionalTeleoperationController::applySnapOnRelease(
+		bool joystick_active,
+		const Eigen::Vector3d &pre_update_offset_linear,
+		const Eigen::Vector3d &pre_update_offset_angular,
+		Eigen::Vector3d &previous_scaled_offset_linear,
+		Eigen::Vector3d &previous_scaled_offset_angular)
+{
+	if (snap_reference_on_release_ && joystick_was_active_ && !joystick_active)
+	{
+		reference_position_linear_ += pre_update_offset_linear * last_linear_scale_;
+		reference_position_angular_ += pre_update_offset_angular * last_angular_scale_;
+		desired_offset_linear_.setZero();
+		desired_offset_angular_.setZero();
+		linear_history_.clear();
+		angular_history_.clear();
+		previous_scaled_offset_linear.setZero();
+		previous_scaled_offset_angular.setZero();
+	}
+
+	joystick_was_active_ = joystick_active;
+}
+
+void FractionalTeleoperationController::applyLinearVelocitySaturation(
+		Eigen::Vector3d &cartesian_linear_velocity,
+		const Eigen::Vector3d &previous_desired_position_linear,
+		Eigen::Vector3d &desired_linear,
+		double current_linear_scale,
+		Eigen::Vector3d &scaled_offset_linear)
+{
+	if (global_linear_velocity_saturation_ <= 0.0)
+	{
+		return;
+	}
+
+	const double linear_velocity_norm = cartesian_linear_velocity.norm();
+	if (linear_velocity_norm <= global_linear_velocity_saturation_)
+	{
+		return;
+	}
+
+	const double linear_saturation_scale = global_linear_velocity_saturation_ / linear_velocity_norm;
+	cartesian_linear_velocity *= linear_saturation_scale;
+
+	desired_linear = previous_desired_position_linear +
+			linear_saturation_scale * (desired_linear - previous_desired_position_linear);
+
+	scaled_offset_linear = desired_linear - reference_position_linear_;
+	if (current_linear_scale > 1e-9)
+	{
+		desired_offset_linear_ = scaled_offset_linear / current_linear_scale;
+	}
+	else
+	{
+		desired_offset_linear_.setZero();
+	}
+}
+
+void FractionalTeleoperationController::applyAngularVelocitySaturation(
+		Eigen::Vector3d &cartesian_angular_velocity,
+		const Eigen::Vector3d &previous_desired_position_angular,
+		const Eigen::Vector3d &previous_reference_position_angular,
+		Eigen::Vector3d &desired_angular,
+		double current_angular_scale,
+		Eigen::Vector3d &scaled_offset_angular)
+{
+	if (global_angular_velocity_saturation_ <= 0.0)
+	{
+		return;
+	}
+
+	const double angular_velocity_norm = cartesian_angular_velocity.norm();
+	if (angular_velocity_norm <= global_angular_velocity_saturation_)
+	{
+		return;
+	}
+
+	const double angular_saturation_scale = global_angular_velocity_saturation_ / angular_velocity_norm;
+	cartesian_angular_velocity *= angular_saturation_scale;
+
+	desired_angular = previous_desired_position_angular +
+			angular_saturation_scale * (desired_angular - previous_desired_position_angular);
+	reference_position_angular_ = previous_reference_position_angular +
+			angular_saturation_scale *
+					(reference_position_angular_ - previous_reference_position_angular);
+
+	scaled_offset_angular = desired_angular - reference_position_angular_;
+	if (current_angular_scale > 1e-9)
+	{
+		desired_offset_angular_ = scaled_offset_angular / current_angular_scale;
+	}
+	else
+	{
+		desired_offset_angular_.setZero();
+	}
+}
+
+void FractionalTeleoperationController::computeReferenceDriftVelocity(
+		const Eigen::Vector3d &previous_reference_position_linear,
+		const Eigen::Vector3d &previous_reference_position_angular,
+		Eigen::Vector3d &reference_linear_velocity,
+		Eigen::Vector3d &reference_angular_velocity) const
+{
+	if (!use_reference_drift_)
+	{
+		reference_linear_velocity.setZero();
+		reference_angular_velocity.setZero();
+		return;
+	}
+
+	reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+			reference_position_linear_,
+			previous_reference_position_linear,
+			dt_);
+	reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+			reference_position_angular_,
+			previous_reference_position_angular,
+			dt_);
+}
+
+std::pair<Eigen::Vector3d, Eigen::Vector3d> FractionalTeleoperationController::updateReferenceDrift(
+		double joystick_linear_norm,
+		const Eigen::Vector3d &desired_linear,
+		const Eigen::Vector3d &desired_angular)
+{
+	if (!use_reference_drift_ || joystick_linear_norm < reference_drift_joystick_threshold_)
+	{
+		return std::make_pair(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+	}
+	
+	Eigen::Vector3d reference_linear_velocity = Eigen::Vector3d::Zero();
+	Eigen::Vector3d reference_angular_velocity = Eigen::Vector3d::Zero();
+	Eigen::Vector3d previous_reference_position_linear = reference_position_linear_;
+	Eigen::Vector3d previous_reference_position_angular = reference_position_angular_;
+
+	if (reference_update_mode_ == "fractional")
+	{
+		reference_position_linear_ = fractional_teleoperation::core::updateReferencePositionFractional(
+				reference_position_linear_,
+				desired_linear,
+				reference_linear_history_,
+				reference_gl_coefficients_,
+				memory_length_,
+				dt_,
+				reference_alpha_,
+				reference_fractional_gain_);
+		reference_position_angular_ = fractional_teleoperation::core::updateReferencePositionFractional(
+				reference_position_angular_,
+				desired_angular,
+				reference_angular_history_,
+				reference_gl_coefficients_,
+				memory_length_,
+				dt_,
+				reference_alpha_,
+				reference_fractional_gain_);
+	}
+	else if (reference_update_mode_ == "first_order"){
+		reference_position_linear_ = fractional_teleoperation::core::updateReferencePosition(
+				reference_position_linear_,
+				desired_linear,
+				reference_drift_rate_,
+				dt_);
+		reference_position_angular_ = fractional_teleoperation::core::updateReferencePosition(
+				reference_position_angular_,
+				desired_angular,
+				reference_drift_rate_,
+				dt_);
+	}
+	else {
+		RCLCPP_ERROR(get_node()->get_logger(), "Invalid reference_update_mode '%s'.", reference_update_mode_.c_str());
+		return std::make_pair(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+	}
+	reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+			reference_position_linear_,
+			previous_reference_position_linear,
+			dt_);
+	reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+			reference_position_angular_,
+			previous_reference_position_angular,
+			dt_);
+	
+	return std::make_pair(reference_linear_velocity, reference_angular_velocity);
+
+}
+
+controller_interface::return_type FractionalTeleoperationController::publishVelocityCommand(
+		const robot_interfaces::CartesianVelocity &latest_vel_cmd)
+{
+	if (use_topic_output_)
+	{
+		if (!vel_cmd_pub_)
+		{
+			RCLCPP_ERROR(get_node()->get_logger(), "Velocity command publisher is not initialized.");
+			return controller_interface::return_type::ERROR;
+		}
+
+		geometry_msgs::msg::TwistStamped msg;
+		msg.header.stamp = get_node()->now();
+		msg.header.frame_id = base_frame_;
+		msg.twist.linear.x = latest_vel_cmd.linear[0];
+		msg.twist.linear.y = latest_vel_cmd.linear[1];
+		msg.twist.linear.z = latest_vel_cmd.linear[2];
+		msg.twist.angular.x = latest_vel_cmd.angular[0];
+		msg.twist.angular.y = latest_vel_cmd.angular[1];
+		msg.twist.angular.z = latest_vel_cmd.angular[2];
+		vel_cmd_pub_->publish(msg);
+		return controller_interface::return_type::OK;
+	}
+
+	if (robot_vel_interface_->setCommand(latest_vel_cmd))
+	{
+		return controller_interface::return_type::OK;
+	}
+
+	RCLCPP_ERROR(get_node()->get_logger(), "Set command failed.");
+	return controller_interface::return_type::ERROR;
+}
+
+std::pair<Eigen::Vector3d, Eigen::Vector3d> FractionalTeleoperationController::rampDesiredOffset(
+		const Eigen::Vector3d &desired_offset_linear,
+		const Eigen::Vector3d &desired_offset_angular,
+		double joystick_active_duration,
+		double &current_linear_scale,
+		double &current_angular_scale) const
+{
+	const double t_ratio = (fractional_offset_scale_ramp_time_ > 0.0)
+							   ? std::min(1.0, joystick_active_duration / fractional_offset_scale_ramp_time_)
+							   : 1.0;
+	const double ramp_factor =
+		fractional_teleoperation::ramp::computeRampFactor(t_ratio, fractional_offset_scale_ramp_profile_);
+	current_linear_scale = fractional_offset_linear_scale_max_ * ramp_factor;
+	current_angular_scale = fractional_offset_angular_scale_max_ * ramp_factor;
+	return {
+		desired_offset_linear * current_linear_scale,
+		desired_offset_angular * current_angular_scale};
 }
 
 CallbackReturn FractionalTeleoperationController::on_configure(const rclcpp_lifecycle::State &)
@@ -452,15 +813,25 @@ CallbackReturn FractionalTeleoperationController::on_configure(const rclcpp_life
 
 CallbackReturn FractionalTeleoperationController::on_activate(const rclcpp_lifecycle::State &)
 {
-	if (!use_topic_output_)
-	{
-		robot_vel_interface_->assign_loaned_command(command_interfaces_);
-	}
-	robot_vel_interface_->assign_loaned_state(state_interfaces_);
-	const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
-	reference_position_linear_ = ee_pose.translation;
-	activatePublishers();
-	return CallbackReturn::SUCCESS;
+    if (!use_topic_output_)
+    {
+        robot_vel_interface_->assign_loaned_command(command_interfaces_);
+    }
+    robot_vel_interface_->assign_loaned_state(state_interfaces_);
+
+    robot_vel_interface_->syncState();  // ensure fresh state before pose read
+    const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
+    reference_position_linear_ = ee_pose.translation;
+
+    RCLCPP_INFO(
+            get_node()->get_logger(),
+            "on_activate: initialized reference_position_linear to [%.6f, %.6f, %.6f]",
+            reference_position_linear_.x(),
+            reference_position_linear_.y(),
+            reference_position_linear_.z());
+
+    activatePublishers();
+    return CallbackReturn::SUCCESS;
 }
 
 CallbackReturn FractionalTeleoperationController::on_deactivate(const rclcpp_lifecycle::State &)
@@ -496,13 +867,8 @@ void FractionalTeleoperationController::publishMarker(
 		return;
 	}
 
-	visualization_msgs::msg::Marker marker_msg;
-	marker_msg.header.stamp = get_node()->now();
-	marker_msg.header.frame_id = marker_frame_id_;
-	marker_msg.ns = "vel_cmd";
-	marker_msg.id = 0;
-	marker_msg.type = visualization_msgs::msg::Marker::ARROW;
-	marker_msg.action = visualization_msgs::msg::Marker::ADD;
+	visualization_msgs::msg::Marker marker_msg = createMarkerBase(
+			get_node()->now(), marker_frame_id_, "vel_cmd", visualization_msgs::msg::Marker::ARROW);
 	marker_msg.scale.x = marker_scale_x_;
 	marker_msg.scale.y = marker_scale_y_;
 	marker_msg.scale.z = marker_scale_z_;
@@ -511,14 +877,11 @@ void FractionalTeleoperationController::publishMarker(
 	marker_msg.color.g = 0.0;
 	marker_msg.color.b = 0.0;
 
-	geometry_msgs::msg::Point start;
-	geometry_msgs::msg::Point end;
-	start.x = desired_position.x();
-	start.y = desired_position.y();
-	start.z = desired_position.z();
-	end.x = start.x + vel_cmd.linear[0];
-	end.y = start.y + vel_cmd.linear[1];
-	end.z = start.z + vel_cmd.linear[2];
+	const geometry_msgs::msg::Point start = toPoint(desired_position);
+	geometry_msgs::msg::Point end = start;
+	end.x += vel_cmd.linear[0];
+	end.y += vel_cmd.linear[1];
+	end.z += vel_cmd.linear[2];
 
 	marker_msg.points = {start, end};
 	vel_cmd_marker_pub_->publish(marker_msg);
@@ -532,13 +895,11 @@ void FractionalTeleoperationController::publishDesiredPositionMarker(
 		return;
 	}
 
-	visualization_msgs::msg::Marker marker_msg;
-	marker_msg.header.stamp = get_node()->now();
-	marker_msg.header.frame_id = marker_frame_id_;
-	marker_msg.ns = "desired_position";
-	marker_msg.id = 0;
-	marker_msg.type = visualization_msgs::msg::Marker::SPHERE;
-	marker_msg.action = visualization_msgs::msg::Marker::ADD;
+	visualization_msgs::msg::Marker marker_msg = createMarkerBase(
+			get_node()->now(),
+			marker_frame_id_,
+			"desired_position",
+			visualization_msgs::msg::Marker::SPHERE);
 	marker_msg.scale.x = desired_position_marker_scale_;
 	marker_msg.scale.y = desired_position_marker_scale_;
 	marker_msg.scale.z = desired_position_marker_scale_;
@@ -546,9 +907,7 @@ void FractionalTeleoperationController::publishDesiredPositionMarker(
 	marker_msg.color.r = 0.0;
 	marker_msg.color.g = 0.3;
 	marker_msg.color.b = 1.0;
-	marker_msg.pose.position.x = desired_position.x();
-	marker_msg.pose.position.y = desired_position.y();
-	marker_msg.pose.position.z = desired_position.z();
+	marker_msg.pose.position = toPoint(desired_position);
 	marker_msg.pose.orientation.w = 1.0;
 
 	desired_position_marker_pub_->publish(marker_msg);
@@ -562,13 +921,11 @@ void FractionalTeleoperationController::publishReferencePositionMarker(
 		return;
 	}
 
-	visualization_msgs::msg::Marker marker_msg;
-	marker_msg.header.stamp = get_node()->now();
-	marker_msg.header.frame_id = marker_frame_id_;
-	marker_msg.ns = "reference_position";
-	marker_msg.id = 0;
-	marker_msg.type = visualization_msgs::msg::Marker::SPHERE;
-	marker_msg.action = visualization_msgs::msg::Marker::ADD;
+	visualization_msgs::msg::Marker marker_msg = createMarkerBase(
+			get_node()->now(),
+			marker_frame_id_,
+			"reference_position",
+			visualization_msgs::msg::Marker::SPHERE);
 	marker_msg.scale.x = reference_position_marker_scale_;
 	marker_msg.scale.y = reference_position_marker_scale_;
 	marker_msg.scale.z = reference_position_marker_scale_;
@@ -576,9 +933,7 @@ void FractionalTeleoperationController::publishReferencePositionMarker(
 	marker_msg.color.r = 1.0;
 	marker_msg.color.g = 0.5;
 	marker_msg.color.b = 0.0;
-	marker_msg.pose.position.x = reference_position.x();
-	marker_msg.pose.position.y = reference_position.y();
-	marker_msg.pose.position.z = reference_position.z();
+	marker_msg.pose.position = toPoint(reference_position);
 	marker_msg.pose.orientation.w = 1.0;
 
 	reference_position_marker_pub_->publish(marker_msg);
@@ -593,13 +948,8 @@ void FractionalTeleoperationController::publishJoystickLinearMarker(
 		return;
 	}
 
-	visualization_msgs::msg::Marker marker_msg;
-	marker_msg.header.stamp = get_node()->now();
-	marker_msg.header.frame_id = marker_frame_id_;
-	marker_msg.ns = "joystick_linear";
-	marker_msg.id = 0;
-	marker_msg.type = visualization_msgs::msg::Marker::ARROW;
-	marker_msg.action = visualization_msgs::msg::Marker::ADD;
+	visualization_msgs::msg::Marker marker_msg = createMarkerBase(
+			get_node()->now(), marker_frame_id_, "joystick_linear", visualization_msgs::msg::Marker::ARROW);
 	marker_msg.scale.x = marker_scale_x_;
 	marker_msg.scale.y = marker_scale_y_;
 	marker_msg.scale.z = marker_scale_z_;
@@ -608,18 +958,42 @@ void FractionalTeleoperationController::publishJoystickLinearMarker(
 	marker_msg.color.g = 1.0;
 	marker_msg.color.b = 0.0;
 
-	geometry_msgs::msg::Point start;
-	geometry_msgs::msg::Point end;
-	start.x = reference_position.x();
-	start.y = reference_position.y();
-	start.z = reference_position.z();
-	end.x = start.x + joystick_linear.x();
-	end.y = start.y + joystick_linear.y();
-	end.z = start.z + joystick_linear.z();
+	const geometry_msgs::msg::Point start = toPoint(reference_position);
+	geometry_msgs::msg::Point end = start;
+	end.x += joystick_linear.x();
+	end.y += joystick_linear.y();
+	end.z += joystick_linear.z();
 
 	marker_msg.points = {start, end};
 	joystick_linear_marker_pub_->publish(marker_msg);
 }
+
+void FractionalTeleoperationController::publishEePoseTranslationMarker(
+		const Eigen::Vector3d &ee_pose_translation)
+{
+	if (!enable_marker_visualization_ || !ee_pose_translation_marker_pub_)
+	{
+		return;
+	}
+
+	visualization_msgs::msg::Marker marker_msg = createMarkerBase(
+			get_node()->now(),
+			marker_frame_id_,
+			"ee_pose_translation",
+			visualization_msgs::msg::Marker::SPHERE);
+	marker_msg.scale.x = ee_pose_translation_marker_scale_;
+	marker_msg.scale.y = ee_pose_translation_marker_scale_;
+	marker_msg.scale.z = ee_pose_translation_marker_scale_;
+	marker_msg.color.a = 1.0;
+	marker_msg.color.r = 0.0;
+	marker_msg.color.g = 1.0;
+	marker_msg.color.b = 0.2;
+	marker_msg.pose.position = toPoint(ee_pose_translation);
+	marker_msg.pose.orientation.w = 1.0;
+
+	ee_pose_translation_marker_pub_->publish(marker_msg);
+}
+
 
 controller_interface::return_type FractionalTeleoperationController::update(
 		const rclcpp::Time &,
@@ -633,18 +1007,16 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	robot_vel_interface_->syncState();
 
 	const auto ee_pose = robot_vel_interface_->getCurrentEndEffectorPose();
+	current_position_ = ee_pose.translation;
 	current_orientation_ = ee_pose.quaternion;
+	const Eigen::Vector3d current_orientation_rpy =
+			current_orientation_.toRotationMatrix().eulerAngles(0, 1, 2);
 
 	using Mode = extender_msgs::msg::TeleopCommand;
 
-	Eigen::Vector3d joystick_linear(
-			latest_joystick_.linear.x,
-			latest_joystick_.linear.y,
-			latest_joystick_.linear.z);
-	Eigen::Vector3d joystick_angular(
-			latest_joystick_.angular.x,
-			latest_joystick_.angular.y,
-			latest_joystick_.angular.z);
+	Eigen::Vector3d joystick_linear;
+	Eigen::Vector3d joystick_angular;
+	readJoystickInput(joystick_linear, joystick_angular);
 
 	RCLCPP_DEBUG(
 			get_node()->get_logger(),
@@ -673,209 +1045,111 @@ controller_interface::return_type FractionalTeleoperationController::update(
 			last_alpha_,
 			memory_length_,
 			gl_coefficients_);
+	
+	RCLCPP_INFO(
+			get_node()->get_logger(),
+			"Current alpha: %.3f (joystick linear norm: %.6f, l_0: %.3f, l_max: %.3f, alpha_min: %.3f, alpha_max: %.3f, alpha_threshold: %.6f)",
+			current_alpha_,
+			joystick_linear.norm(),
+			l_0_,
+			l_max_,
+			alpha_min_,
+			alpha_max_,
+			alpha_threshold_);
+			
 	if (adapt_gain_to_alpha_)
 	{
 		updateGainK();
 	}
 
-	Eigen::Vector3d previous_scaled_offset_linear = desired_position_linear_ * last_linear_scale_;
-	Eigen::Vector3d previous_scaled_offset_angular = desired_position_angular_ * last_angular_scale_;
-	const Eigen::Vector3d previous_desired_position_linear =
-			previous_reference_position_linear + previous_scaled_offset_linear;
-	const Eigen::Vector3d previous_desired_position_angular =
-			previous_reference_position_angular + previous_scaled_offset_angular;
-	const Eigen::Vector3d pre_update_offset_linear = desired_position_linear_;
-	const Eigen::Vector3d pre_update_offset_angular = desired_position_angular_;
+	Eigen::Vector3d previous_scaled_offset_linear = desired_offset_linear_ * last_linear_scale_;
+	Eigen::Vector3d previous_scaled_offset_angular = desired_offset_angular_ * last_angular_scale_;
+	const Eigen::Vector3d previous_desired_position_linear = previous_reference_position_linear + previous_scaled_offset_linear;
+	const Eigen::Vector3d previous_desired_position_angular = previous_reference_position_angular + previous_scaled_offset_angular;
+	const Eigen::Vector3d pre_update_offset_linear = desired_offset_linear_;
+	const Eigen::Vector3d pre_update_offset_angular = desired_offset_angular_;
 
-	desired_position_linear_ = fractional_teleoperation::core::applyFractionalIntegration(
-			joystick_linear,
-			linear_history_,
-			gl_coefficients_,
-			memory_length_,
-			dt_,
-			current_alpha_,
-			gain_K_);
-			
-	desired_position_angular_ = fractional_teleoperation::core::applyFractionalIntegration(
-			joystick_angular,
-			angular_history_,
-			gl_coefficients_,
-			memory_length_,
-			dt_,
-			current_alpha_,
-			gain_K_);
+	integrateDesiredOffsets(joystick_linear, joystick_angular);
 
-	const bool joystick_active = joystick_linear.norm() > joystick_active_threshold_;
-	if (joystick_active)
-	{
-		joystick_active_duration_ += dt_;
-	}
-	else
-	{
-		joystick_active_duration_ = 0.0;
-	}
+	const double joystick_linear_norm = joystick_linear.norm();
+	// const bool joystick_active = joystick_linear_norm > joystick_active_threshold_;
+	// updateJoystickActivityDuration(joystick_active);
 
-	const double t_ratio = (fractional_offset_scale_ramp_time_ > 0.0)
-														 ? std::min(1.0, joystick_active_duration_ / fractional_offset_scale_ramp_time_)
-														 : 1.0;
-	const double ramp_factor =
-			fractional_teleoperation::ramp::computeRampFactor(t_ratio, fractional_offset_scale_ramp_profile_);
-	const double current_linear_scale = fractional_offset_linear_scale_max_ * ramp_factor;
-	const double current_angular_scale = fractional_offset_angular_scale_max_ * ramp_factor;
+	// double current_linear_scale = 0.0;
+	// double current_angular_scale = 0.0;
+	// std::tie(desired_offset_linear_, desired_offset_angular_) = rampDesiredOffset(
+	// 		desired_offset_linear_,
+	// 		desired_offset_angular_,
+	// 		joystick_active_duration_,
+	// 		current_linear_scale,
+	// 		current_angular_scale);
 
-	Eigen::Vector3d scaled_offset_linear = desired_position_linear_ * current_linear_scale;
-	Eigen::Vector3d scaled_offset_angular = desired_position_angular_ * current_angular_scale;
+	Eigen::Vector3d desired_linear = reference_position_linear_ + desired_offset_linear_;
+	Eigen::Vector3d desired_angular = reference_position_angular_ + desired_offset_angular_;
 
-	Eigen::Vector3d desired_linear = reference_position_linear_ + scaled_offset_linear;
-	Eigen::Vector3d desired_angular = reference_position_angular_ + scaled_offset_angular;
-
-	if (snap_reference_on_release_ && joystick_was_active_ && !joystick_active)
-	{
-		reference_position_linear_ += pre_update_offset_linear * last_linear_scale_;
-		reference_position_angular_ += pre_update_offset_angular * last_angular_scale_;
-		desired_position_linear_.setZero();
-		desired_position_angular_.setZero();
-		linear_history_.clear();
-		angular_history_.clear();
-		previous_scaled_offset_linear.setZero();
-		previous_scaled_offset_angular.setZero();
-	}
-	joystick_was_active_ = joystick_active;
-	last_linear_scale_ = current_linear_scale;
-	last_angular_scale_ = current_angular_scale;
+	// // applySnapOnRelease(
+	// // 		joystick_active,
+	// // 		pre_update_offset_linear,
+	// // 		pre_update_offset_angular,
+	// // 		previous_scaled_offset_linear,
+	// // 		previous_scaled_offset_angular);
+	// // last_linear_scale_ = current_linear_scale;
+	// // last_angular_scale_ = current_angular_scale;
 
 	Eigen::Vector3d reference_linear_velocity = Eigen::Vector3d::Zero();
 	Eigen::Vector3d reference_angular_velocity = Eigen::Vector3d::Zero();
-	if (use_reference_drift_)
-	{
-		reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-			reference_position_linear_,
-				previous_reference_position_linear,
-				dt_);
-		reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-			reference_position_angular_,
-				previous_reference_position_angular,
-				dt_);
-	}
+	// computeReferenceDriftVelocity(
+	// 		previous_reference_position_linear,
+	// 		previous_reference_position_angular,
+	// 		reference_linear_velocity,
+	// 		reference_angular_velocity);
+
+	
 
 	Eigen::Vector3d cartesian_linear_velocity =
 			fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-					scaled_offset_linear,
-					previous_scaled_offset_linear,
+					desired_linear,
+					current_position_,
 					dt_);
-	Eigen::Vector3d cartesian_angular_velocity =
-			fractional_teleoperation::core::computeVelocityFromDesiredPosition(
-					scaled_offset_angular,
-					previous_scaled_offset_angular,
-					dt_);
+	Eigen::Vector3d cartesian_angular_velocity = Eigen::Vector3d::Zero();
+			// fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+			// 		desired_angular,
+			// 		current_orientation_rpy,
+			// 		dt_);
+
+
+	// fractional_teleoperation::core::transformApplyModeAndScale(
+	// 		cartesian_linear_velocity,
+	// 		cartesian_angular_velocity,
+	// 		input_frame_,
+	// 		current_orientation_,
+	// 		mode_,
+	// 		Mode::TRANSLATION,
+	// 		Mode::ROTATION,
+	// 		velocity_scale_);
+
+	// applyLinearVelocitySaturation(
+	// 		cartesian_linear_velocity,
+	// 		previous_desired_position_linear,
+	// 		desired_linear,
+	// 		current_linear_scale,
+	// 		desired_offset_linear_);
+	// applyAngularVelocitySaturation(
+	// 		cartesian_angular_velocity,
+	// 		previous_desired_position_angular,
+	// 		previous_reference_position_angular,
+	// 		desired_angular,
+	// 		current_angular_scale,
+	// 		desired_offset_angular_);
+
+	std::tie(reference_linear_velocity, reference_angular_velocity) = updateReferenceDrift(joystick_linear_norm, desired_linear, desired_angular);
+
 
 	cartesian_linear_velocity -= reference_linear_velocity;
 	cartesian_angular_velocity -= reference_angular_velocity;
 
-	fractional_teleoperation::core::transformApplyModeAndScale(
-			cartesian_linear_velocity,
-			cartesian_angular_velocity,
-			input_frame_,
-			current_orientation_,
-			mode_,
-			Mode::TRANSLATION,
-			Mode::ROTATION,
-			velocity_scale_);
-
-	if (global_linear_velocity_saturation_ > 0.0)
-	{
-		const double linear_velocity_norm = cartesian_linear_velocity.norm();
-		if (linear_velocity_norm > global_linear_velocity_saturation_)
-		{
-			const double linear_saturation_scale = global_linear_velocity_saturation_ / linear_velocity_norm;
-			cartesian_linear_velocity *= linear_saturation_scale;
-
-			desired_linear = previous_desired_position_linear +
-					linear_saturation_scale * (desired_linear - previous_desired_position_linear);
-
-			scaled_offset_linear = desired_linear - reference_position_linear_;
-			if (current_linear_scale > 1e-9)
-			{
-				desired_position_linear_ = scaled_offset_linear / current_linear_scale;
-			}
-			else
-			{
-				desired_position_linear_.setZero();
-			}
-		}
-	}
-
-	if (global_angular_velocity_saturation_ > 0.0)
-	{
-		const double angular_velocity_norm = cartesian_angular_velocity.norm();
-		if (angular_velocity_norm > global_angular_velocity_saturation_)
-		{
-			const double angular_saturation_scale = global_angular_velocity_saturation_ / angular_velocity_norm;
-			cartesian_angular_velocity *= angular_saturation_scale;
-
-			desired_angular = previous_desired_position_angular +
-					angular_saturation_scale * (desired_angular - previous_desired_position_angular);
-			reference_position_angular_ = previous_reference_position_angular +
-					angular_saturation_scale *
-							(reference_position_angular_ - previous_reference_position_angular);
-
-			scaled_offset_angular = desired_angular - reference_position_angular_;
-			if (current_angular_scale > 1e-9)
-			{
-				desired_position_angular_ = scaled_offset_angular / current_angular_scale;
-			}
-			else
-			{
-				desired_position_angular_.setZero();
-			}
-		}
-	}
-
-	if (use_reference_drift_ && joystick_linear.norm() >= reference_drift_joystick_threshold_)
-	{
-		if (reference_update_mode_ == "fractional")
-		{
-			  reference_position_linear_ = fractional_teleoperation::core::updateReferencePositionFractional(
-				  reference_position_linear_,
-					desired_linear,
-					reference_linear_history_,
-					reference_gl_coefficients_,
-					memory_length_,
-					dt_,
-					reference_alpha_,
-					reference_fractional_gain_);
-			  reference_position_angular_ = fractional_teleoperation::core::updateReferencePositionFractional(
-				  reference_position_angular_,
-					desired_angular,
-					reference_angular_history_,
-					reference_gl_coefficients_,
-					memory_length_,
-					dt_,
-					reference_alpha_,
-					reference_fractional_gain_);
-		}
-		else
-		{
-			  reference_position_linear_ = fractional_teleoperation::core::updateReferencePosition(
-				  reference_position_linear_,
-					desired_linear,
-					reference_drift_rate_,
-					dt_);
-			  reference_position_angular_ = fractional_teleoperation::core::updateReferencePosition(
-				  reference_position_angular_,
-					desired_angular,
-					reference_drift_rate_,
-					dt_);
-		}
-	}
-
-	robot_interfaces::CartesianVelocity latest_vel_cmd;
-	latest_vel_cmd.linear[0] = cartesian_linear_velocity.x();
-	latest_vel_cmd.linear[1] = cartesian_linear_velocity.y();
-	latest_vel_cmd.linear[2] = cartesian_linear_velocity.z();
-	latest_vel_cmd.angular[0] = cartesian_angular_velocity.x();
-	latest_vel_cmd.angular[1] = cartesian_angular_velocity.y();
-	latest_vel_cmd.angular[2] = cartesian_angular_velocity.z();
+	const robot_interfaces::CartesianVelocity latest_vel_cmd =
+			toCartesianVelocity(cartesian_linear_velocity, cartesian_angular_velocity);
 
 	RCLCPP_DEBUG(get_node()->get_logger(),
 		"latest_vel_cmd - linear: [%.6f, %.6f, %.6f], angular: [%.6f, %.6f, %.6f]",
@@ -887,37 +1161,11 @@ controller_interface::return_type FractionalTeleoperationController::update(
 		publishDesiredPositionMarker(desired_linear);
 		publishReferencePositionMarker(reference_position_linear_);
 		publishJoystickLinearMarker(joystick_linear, reference_position_linear_);
+		publishEePoseTranslationMarker(ee_pose.translation);
 		publishMarker(latest_vel_cmd, desired_linear);
 	}
 
-	if (use_topic_output_)
-	{
-		if (!vel_cmd_pub_)
-		{
-			RCLCPP_ERROR(get_node()->get_logger(), "Velocity command publisher is not initialized.");
-			return controller_interface::return_type::ERROR;
-		}
-
-		geometry_msgs::msg::TwistStamped msg;
-		msg.header.stamp = get_node()->now();
-		msg.header.frame_id = base_frame_;
-		msg.twist.linear.x = latest_vel_cmd.linear[0];
-		msg.twist.linear.y = latest_vel_cmd.linear[1];
-		msg.twist.linear.z = latest_vel_cmd.linear[2];
-		msg.twist.angular.x = latest_vel_cmd.angular[0];
-		msg.twist.angular.y = latest_vel_cmd.angular[1];
-		msg.twist.angular.z = latest_vel_cmd.angular[2];
-		vel_cmd_pub_->publish(msg);
-		return controller_interface::return_type::OK;
-	}
-
-	if (robot_vel_interface_->setCommand(latest_vel_cmd))
-	{
-		return controller_interface::return_type::OK;
-	}
-
-	RCLCPP_ERROR(get_node()->get_logger(), "Set command failed.");
-	return controller_interface::return_type::ERROR;
+	return publishVelocityCommand(latest_vel_cmd);
 }
 
 }  // namespace fractional_teleoperation_controller

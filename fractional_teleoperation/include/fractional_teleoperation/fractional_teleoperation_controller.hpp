@@ -3,6 +3,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -103,6 +104,12 @@ namespace fractional_teleoperation_controller
 
     void loadParameters();
 
+    void declareParameters();
+
+    void validateAndNormalizeParameters();
+
+    void resetControllerState();
+
     void setupSubscribers();
 
     void declarePublishers();
@@ -114,6 +121,59 @@ namespace fractional_teleoperation_controller
     bool setupRobotInterface();
 
     void updateGainK();
+
+    void readJoystickInput(
+      Eigen::Vector3d &joystick_linear,
+      Eigen::Vector3d &joystick_angular) const;
+
+    void integrateDesiredOffsets(
+      const Eigen::Vector3d &joystick_linear,
+      const Eigen::Vector3d &joystick_angular);
+
+    void updateJoystickActivityDuration(bool joystick_active);
+
+    void applySnapOnRelease(
+      bool joystick_active,
+      const Eigen::Vector3d &pre_update_offset_linear,
+      const Eigen::Vector3d &pre_update_offset_angular,
+      Eigen::Vector3d &previous_scaled_offset_linear,
+      Eigen::Vector3d &previous_scaled_offset_angular);
+
+    void applyLinearVelocitySaturation(
+      Eigen::Vector3d &cartesian_linear_velocity,
+      const Eigen::Vector3d &previous_desired_position_linear,
+      Eigen::Vector3d &desired_linear,
+      double current_linear_scale,
+      Eigen::Vector3d &scaled_offset_linear);
+
+    void applyAngularVelocitySaturation(
+      Eigen::Vector3d &cartesian_angular_velocity,
+      const Eigen::Vector3d &previous_desired_position_angular,
+      const Eigen::Vector3d &previous_reference_position_angular,
+      Eigen::Vector3d &desired_angular,
+      double current_angular_scale,
+      Eigen::Vector3d &scaled_offset_angular);
+
+    void computeReferenceDriftVelocity(
+      const Eigen::Vector3d &previous_reference_position_linear,
+      const Eigen::Vector3d &previous_reference_position_angular,
+      Eigen::Vector3d &reference_linear_velocity,
+      Eigen::Vector3d &reference_angular_velocity) const;
+
+    std::pair<Eigen::Vector3d, Eigen::Vector3d> updateReferenceDrift(
+      double joystick_linear_norm,
+      const Eigen::Vector3d &desired_linear,
+      const Eigen::Vector3d &desired_angular);
+
+    controller_interface::return_type publishVelocityCommand(
+      const robot_interfaces::CartesianVelocity &latest_vel_cmd);
+
+    std::pair<Eigen::Vector3d, Eigen::Vector3d> rampDesiredOffset(
+      const Eigen::Vector3d &desired_offset_linear,
+      const Eigen::Vector3d &desired_offset_angular,
+      double joystick_active_duration,
+      double &current_linear_scale,
+      double &current_angular_scale) const;
 
     /// Callback to receive normalized 3D joystick commands
     void joystickCallback(const extender_msgs::msg::TeleopCommand::SharedPtr msg);
@@ -131,6 +191,8 @@ namespace fractional_teleoperation_controller
       const Eigen::Vector3d &joystick_linear,
       const Eigen::Vector3d &reference_position);
 
+    void publishEePoseTranslationMarker(const Eigen::Vector3d &ee_pose_translation);
+
     /// Generic component to interface with robot hardware
     std::unique_ptr<robot_interfaces::GenericComponent> robot_vel_interface_;
 
@@ -140,13 +202,14 @@ namespace fractional_teleoperation_controller
     geometry_msgs::msg::Twist latest_joystick_;
 
     /// Desired position state (result of fractional integration)
-    Eigen::Vector3d desired_position_linear_;
-    Eigen::Vector3d desired_position_angular_;
+    Eigen::Vector3d desired_offset_linear_;
+    Eigen::Vector3d desired_offset_angular_;
     Eigen::Vector3d reference_position_linear_;
     Eigen::Vector3d reference_position_angular_;
 
     /// Robot state
     Eigen::Quaterniond current_orientation_;
+    Eigen::Vector3d current_position_;
     
     /// Current alpha value (may be dynamic)
     double current_alpha_;
@@ -230,6 +293,8 @@ namespace fractional_teleoperation_controller
       reference_position_marker_pub_;
     rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr
       joystick_linear_marker_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::Marker>::SharedPtr
+      ee_pose_translation_marker_pub_;
 
     /// Marker visualization parameters
     bool enable_marker_visualization_{true};
@@ -243,6 +308,8 @@ namespace fractional_teleoperation_controller
     std::string reference_position_marker_topic_{"/reference_position_marker"};
     double reference_position_marker_scale_{0.04};
     std::string joystick_linear_marker_topic_{"/joystick_linear_marker"};
+    std::string ee_pose_translation_marker_topic_{"/ee_pose_translation_marker"};
+    double ee_pose_translation_marker_scale_{0.04};
 
     // Frame for interpreting incoming joystick commands: "base" or "ee"
     std::string input_frame_{"base"};

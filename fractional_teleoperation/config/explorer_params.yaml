@@ -60,15 +60,15 @@ fractional_teleoperation_controller:
     alpha_gain_normalization_mode: "geometric_transition"  # "dt", "perceptual", or "geometric_transition"
     v_max: 1.0                    # Max velocity used for adaptive K (m/s)
     t_ref: 0.2                    # Reference time for perceptual gain mode (s)
-    k_0: 2.0                     # Position-amplification endpoint used by geometric_transition
-    k_1: 1.0                      # Velocity-gain endpoint used by geometric_transition
+    k_0: 0.1                     # Position-amplification endpoint used by geometric_transition
+    k_1: 0.1                      # Velocity-gain endpoint used by geometric_transition
     
     # Dynamic alpha parameters
-    use_dynamic_alpha: false         # Enable dynamic alpha adjustment based on joystick norm
+    use_dynamic_alpha: true         # Enable dynamic alpha adjustment based on joystick norm
     alpha_min: 0.1          # Minimum alpha value when joystick is below l_0
     alpha_max: 1.0        # Maximum alpha value when joystick is at or above l_max
-    l_0: 0.5              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
-    l_max: 1.           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
+    l_0: 0.6              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
+    l_max: 1.0           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
     alpha_threshold: 0.001  # Minimum alpha used by the dynamic-alpha update logic
 
     # Fractional offset scaling (configurable ramp from 0 to max over scale_ramp_time)
@@ -80,7 +80,7 @@ fractional_teleoperation_controller:
     # Desired position is expressed as (x_des - x_ref), with slow drift of x_ref
 
     joystick_active_threshold: 0.01  # Joystick is considered "active" for ramp scaling when ||joystick_linear|| >= this value
-    snap_reference_on_release: true          # Snap x_ref to current x_des when joystick transitions from active to zero    
+    snap_reference_on_release: false          # Snap x_ref to current x_des when joystick transitions from active to zero    
 
     use_reference_drift: true   # Enable slow drift of reference position towards current position to prevent long-term drift
     reference_drift_joystick_threshold: 0.025  # Drift only when ||joystick_linear|| >= this value
