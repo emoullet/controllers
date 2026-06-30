@@ -48,7 +48,8 @@ fractional_teleoperation_controller:
 
     # Fractional-order parameters
     alpha: 1.5                    # Fractional order (0 < alpha < 2)
-    gain_K: 0.1                   # Gain in fractional law D^alpha x_d = K u
+    linear_fractional_offset_gain: 0.1
+    angular_fractional_offset_gain: 0.1
     memory_length: 100            # Number of past samples for GL approximation
     dt: 0.01                       # Time step in seconds (should match update_rate)
     velocity_scale: 1.0           # Overall velocity scaling factor
@@ -56,17 +57,27 @@ fractional_teleoperation_controller:
     global_angular_velocity_saturation: 0.0
     input_frame: "base"
 
-    normalize_gain_for_alpha: true
-    alpha_gain_normalization_mode: "dt"
-    v_max: 1.0
-    t_ref: 1.0
-    k_0: 1.0
-    k_1: 1.0
+    linear_normalize_gain_for_alpha: true
+    angular_normalize_gain_for_alpha: true
+    linear_alpha_gain_normalization_mode: "dt"
+    angular_alpha_gain_normalization_mode: "dt"
+    linear_v_max: 1.0
+    angular_v_max: 1.0
+    linear_t_ref: 1.0
+    angular_t_ref: 1.0
+    linear_k_0: 1.0
+    angular_k_0: 1.0
+    linear_k_1: 1.0
+    angular_k_1: 1.0
 
     use_reference_drift: true
     reference_first_order_rate: 0.15
     reference_drift_joystick_threshold: 0.0
     joystick_active_threshold: 0.01
+    joystick_timeout_sec: 0.2
+    linear_deadband: 0.01
+    angular_deadband: 0.03
+    k_orient: 4.0
     snap_reference_on_release: false
     reference_update_mode: "first_order"
     reference_fractional_alpha: 0.8

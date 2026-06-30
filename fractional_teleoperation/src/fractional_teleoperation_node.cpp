@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "signal_processing/saturation.hpp"
+
 namespace fractional_teleoperation_node
 {
   FractionalTeleoperationNode::FractionalTeleoperationNode(
@@ -751,8 +753,8 @@ namespace fractional_teleoperation_node
       {
         RCLCPP_DEBUG(get_logger(), "Linear velocity saturated: %.4f -> %.4f", linear_velocity_norm, global_linear_velocity_saturation_);
         const double linear_saturation_scale = global_linear_velocity_saturation_ / linear_velocity_norm;
-        // Scale down the entire linear velocity vector to maintain direction while enforcing saturation
-        cartesian_linear_velocity *= linear_saturation_scale;
+        cartesian_linear_velocity =
+          signal_processing::limitNorm(cartesian_linear_velocity, global_linear_velocity_saturation_);
 
         // Keep internal position states consistent with the saturated commanded velocity.
         desired_position_linear = previous_desired_position_linear +
@@ -780,8 +782,8 @@ namespace fractional_teleoperation_node
       {
         RCLCPP_DEBUG(get_logger(), "Angular velocity saturated: %.4f -> %.4f", angular_velocity_norm, global_angular_velocity_saturation_);
         const double angular_saturation_scale = global_angular_velocity_saturation_ / angular_velocity_norm;
-        // Scale down the entire angular velocity vector to maintain direction while enforcing saturation
-        cartesian_angular_velocity *= angular_saturation_scale;
+        cartesian_angular_velocity =
+          signal_processing::limitNorm(cartesian_angular_velocity, global_angular_velocity_saturation_);
 
         // Keep internal position states consistent with the saturated commanded velocity.
         desired_position_angular = previous_desired_position_angular +

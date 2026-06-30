@@ -126,6 +126,10 @@ namespace fractional_teleoperation_controller
       Eigen::Vector3d &joystick_linear,
       Eigen::Vector3d &joystick_angular) const;
 
+    Eigen::Vector3d applyDeadbandToVector(const Eigen::Vector3d &input, double deadband) const;
+
+    bool isJoystickInputFresh() const;
+
     void integrateDesiredOffsets(
       const Eigen::Vector3d &joystick_linear,
       const Eigen::Vector3d &joystick_angular);
@@ -206,35 +210,57 @@ namespace fractional_teleoperation_controller
     Eigen::Vector3d desired_offset_angular_;
     Eigen::Vector3d reference_position_linear_;
     Eigen::Vector3d reference_position_angular_;
+    Eigen::Quaterniond orientation_error_;
+    
 
     /// Robot state
     Eigen::Quaterniond current_orientation_;
+    Eigen::Quaterniond reference_orientation_;
     Eigen::Vector3d current_position_;
+    Eigen::Vector3d current_angular_velocity_;
     
-    /// Current alpha value (may be dynamic)
-    double current_alpha_;
+    /// Current alpha values (may be dynamic)
+    double current_linear_alpha_;
+    double current_angular_alpha_;
 
     /// Fractional-order parameters
-    double alpha_;           // Fractional order (0 < alpha < 2)
-    double gain_K_;          // Gain K in the fractional law D^alpha x_d = K u
+    double linear_alpha_;    // Linear fractional order (0 < alpha < 2)
+    double angular_alpha_;   // Angular fractional order (0 < alpha < 2)
+    double linear_gain_K_;   // Linear gain K in the fractional law D^alpha x_d = K u
+    double angular_gain_K_;  // Angular gain K in the fractional law D^alpha x_d = K u
     int memory_length_;      // Number of past samples to keep for GL approximation
+    int update_rate_;     // Update rate (Hz) from controller manager
     double dt_;              // Time step (seconds)
     double velocity_scale_{1.0};
 
     double global_linear_velocity_saturation_{0.0};
     double global_angular_velocity_saturation_{0.0};
 
-    bool adapt_gain_to_alpha_{true};
-    std::string adaptive_gain_mode_{"dt"};
-    double v_max_{1.0};
-    double t_ref_{1.0};
-    double k_0_{1.0};
-    double k_1_{1.0};
+    bool linear_normalize_gain_for_alpha_{true};
+    bool angular_normalize_gain_for_alpha_{true};
+    std::string linear_alpha_gain_normalization_mode_{"dt"};
+    std::string angular_alpha_gain_normalization_mode_{"dt"};
+    double linear_v_max_{1.0};
+    double angular_v_max_{1.0};
+    double linear_t_ref_{1.0};
+    double angular_t_ref_{1.0};
+    double linear_k_0_{1.0};
+    double angular_k_0_{1.0};
+    double linear_k_1_{1.0};
+    double angular_k_1_{1.0};
 
     bool use_reference_drift_{true};
     double reference_drift_rate_{0.15};
     double reference_drift_joystick_threshold_{0.0};
     double joystick_active_threshold_{0.01};
+    double joystick_timeout_sec_{0.2};
+    rclcpp::Time last_joystick_stamp_{0, 0, RCL_ROS_TIME};
+    bool joystick_message_received_{false};
+    double linear_deadband_{0.01};
+    double angular_deadband_{0.03};
+    double k_orient_{4.0};
+    double kp_orient_{1.0};
+    double kd_orient_{0.1};
     bool snap_reference_on_release_{false};
     std::string reference_update_mode_{"first_order"};
     double reference_alpha_{0.8};
@@ -245,16 +271,23 @@ namespace fractional_teleoperation_controller
     std::string fractional_offset_scale_ramp_profile_{"sigmoid"};
 
     /// Dynamic alpha parameters
-    bool use_dynamic_alpha_{false};  // Whether to enable dynamic alpha based on joystick norm
-    double alpha_min_{0.0};
-    double alpha_max_{1.0};          // Maximum alpha value for dynamic adjustment
-    double l_0_{0.1};                // Lower threshold for joystick norm
-    double l_max_{1.0};              // Upper threshold for joystick norm
+    bool use_dynamic_alpha_linear_{false};
+    bool use_dynamic_alpha_angular_{false};
+    double linear_alpha_min_{0.0};
+    double linear_alpha_max_{1.0};
+    double linear_l_0_{0.1};
+    double linear_l_max_{1.0};
+    double angular_alpha_min_{0.0};
+    double angular_alpha_max_{1.0};
+    double angular_l_0_{0.1};
+    double angular_l_max_{1.0};
     double alpha_threshold_{0.001};
-    double last_alpha_{0.0};         // Track last alpha to detect changes
+    double last_linear_alpha_{0.0};
+    double last_angular_alpha_{0.0};
 
     /// Grünwald-Letnikov coefficients
-    std::vector<double> gl_coefficients_;
+    std::vector<double> linear_gl_coefficients_;
+    std::vector<double> angular_gl_coefficients_;
     std::vector<double> reference_gl_coefficients_;
 
     /// History buffers for fractional integration

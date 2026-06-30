@@ -18,6 +18,7 @@
   <depend>robot_interfaces</depend>
   <depend>extender_msgs</depend>
   <depend>eigen</depend>
+  <depend>signal_processing</depend>
 
   <exec_depend>hand_joystick_interfaces</exec_depend>
   <exec_depend>mediapipe_mocap</exec_depend>

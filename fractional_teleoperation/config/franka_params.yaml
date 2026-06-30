@@ -15,7 +15,8 @@ fractional_teleoperation_controller:
                                    # alpha < 1.0: more damping, smoother
                                    # alpha > 1.0: less damping, more responsive
     
-    gain_K: 0.1                   # Gain in fractional law D^alpha x_d = K u
+    linear_fractional_offset_gain: 0.1
+    angular_fractional_offset_gain: 0.1
     
     memory_length: 100            # Number of past samples for GL approximation
     
@@ -28,12 +29,18 @@ fractional_teleoperation_controller:
     # Input frame: "base" or "ee"
     input_frame: "base"
 
-    normalize_gain_for_alpha: true
-    alpha_gain_normalization_mode: "dt"
-    v_max: 1.0
-    t_ref: 1.0
-    k_0: 1.0
-    k_1: 1.0
+    linear_normalize_gain_for_alpha: true
+    angular_normalize_gain_for_alpha: true
+    linear_alpha_gain_normalization_mode: "dt"
+    angular_alpha_gain_normalization_mode: "dt"
+    linear_v_max: 1.0
+    angular_v_max: 1.0
+    linear_t_ref: 1.0
+    angular_t_ref: 1.0
+    linear_k_0: 1.0
+    angular_k_0: 1.0
+    linear_k_1: 1.0
+    angular_k_1: 1.0
 
     use_reference_drift: true
     reference_first_order_rate: 0.15
@@ -70,4 +77,3 @@ fractional_teleoperation_controller:
     # - alpha = 0         when lambda < l_0
     # - alpha = α_max * (lambda - l_0) / (l_max - l_0)  when l_0 <= lambda <= l_max
     # - alpha = α_max     when lambda > l_max
-

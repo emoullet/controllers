@@ -16,6 +16,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(robot_interfaces REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(extender_msgs REQUIRED)
+find_package(signal_processing REQUIRED)
 
 include_directories(
   include
@@ -49,6 +50,7 @@ ament_target_dependencies(${PROJECT_NAME}
   robot_interfaces
   Eigen3
   extender_msgs
+  signal_processing
 )
 target_link_libraries(${PROJECT_NAME}
   fractional_teleoperation_core
@@ -63,6 +65,7 @@ ament_target_dependencies(fractional_teleoperation_node
   visualization_msgs
   Eigen3
   extender_msgs
+  signal_processing
 )
 target_link_libraries(fractional_teleoperation_node
   fractional_teleoperation_core

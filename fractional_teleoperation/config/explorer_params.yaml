@@ -23,7 +23,7 @@ qontrol_explorer:
     robot_command: position
 
     # Velocity parameters
-    command_max_linear_velocity: 0.05
+    command_max_linear_velocity: 10.05
     command_max_angular_velocity: 1.0
     refresh_mapping: True
     open_loop: True
@@ -48,27 +48,39 @@ fractional_teleoperation_controller:
     teleop_cmd_input_topic: "/teleop_cmd"
     
     # Fractional-order parameters
-    alpha: 0.                   # Fractional order (0 < alpha < 2)
-    fractional_offset_gain: 1.  # Gain in fractional law D^alpha x_d = K u
+    linear_alpha: 1.             # Linear fractional order (0 < alpha < 2)
+    angular_alpha: 0.            # Angular fractional order (0 < alpha < 2)
+    linear_fractional_offset_gain: 1.   # Manual linear gain in fractional law D^alpha x_d = K u
+    angular_fractional_offset_gain: 1.  # Manual angular gain in fractional law D^alpha x_d = K u
     memory_length: 50            # Number of past samples for GL approximation
-    dt: 0.01                      # Time step in seconds (100 Hz update rate)
     output_velocity_scale: 1.0    # Overall output velocity scaling factor
-    global_linear_velocity_saturation: 5.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
-    global_angular_velocity_saturation: 5.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
+    global_linear_velocity_saturation: 1.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
+    global_angular_velocity_saturation: 1.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
     input_frame: "base"           # Reference frame: "base" or "ee"
-    normalize_gain_for_alpha: true         # Normalize K across alpha using v_max-based formulas
-    alpha_gain_normalization_mode: "geometric_transition"  # "dt", "perceptual", or "geometric_transition"
-    v_max: 1.0                    # Max velocity used for adaptive K (m/s)
-    t_ref: 0.2                    # Reference time for perceptual gain mode (s)
-    k_0: 0.1                     # Position-amplification endpoint used by geometric_transition
-    k_1: 0.1                      # Velocity-gain endpoint used by geometric_transition
+    linear_normalize_gain_for_alpha: true   # Normalize linear K across alpha
+    angular_normalize_gain_for_alpha: true  # Normalize angular K across alpha
+    linear_alpha_gain_normalization_mode: "geometric_transition"   # "dt", "perceptual", or "geometric_transition"
+    angular_alpha_gain_normalization_mode: "geometric_transition"  # "dt", "perceptual", or "geometric_transition"
+    linear_v_max: 1.0             # Max velocity used for adaptive linear K (m/s)
+    angular_v_max: 1.0            # Max velocity used for adaptive angular K
+    linear_t_ref: 0.2             # Reference time for linear perceptual gain mode (s)
+    angular_t_ref: 0.2            # Reference time for angular perceptual gain mode (s)
+    linear_k_0: 0.4               # Linear position-amplification endpoint used by geometric_transition
+    angular_k_0: 0.2              # Angular position-amplification endpoint used by geometric_transition
+    linear_k_1: 0.1               # Linear velocity-gain endpoint used by geometric_transition
+    angular_k_1: 0.2              # Angular velocity-gain endpoint used by geometric_transition
     
     # Dynamic alpha parameters
-    use_dynamic_alpha: true         # Enable dynamic alpha adjustment based on joystick norm
-    alpha_min: 0.1          # Minimum alpha value when joystick is below l_0
-    alpha_max: 1.0        # Maximum alpha value when joystick is at or above l_max
-    l_0: 0.6              # Threshold for alpha interpolation (joystick norm below this is alpha_min, above l_max is alpha_max)
-    l_max: 1.0           # Threshold for alpha interpolation (joystick norm above this is alpha_max)
+    use_dynamic_alpha_linear: false   # Enable dynamic alpha adjustment based on ||linear joystick||
+    use_dynamic_alpha_angular: false  # Enable dynamic alpha adjustment based on ||angular joystick||
+    linear_alpha_min: 0.1             # Linear alpha when ||linear joystick|| is below linear_l_0
+    linear_alpha_max: 1.0             # Linear alpha when ||linear joystick|| is at or above linear_l_max
+    linear_l_0: 0.6                   # Lower linear joystick norm threshold for alpha interpolation
+    linear_l_max: 1.0                 # Upper linear joystick norm threshold for alpha interpolation
+    angular_alpha_min: 0.1            # Angular alpha when ||angular joystick|| is below angular_l_0
+    angular_alpha_max: 1.0            # Angular alpha when ||angular joystick|| is at or above angular_l_max
+    angular_l_0: 0.6                  # Lower angular joystick norm threshold for alpha interpolation
+    angular_l_max: 1.0                # Upper angular joystick norm threshold for alpha interpolation
     alpha_threshold: 0.001  # Minimum alpha used by the dynamic-alpha update logic
 
     # Fractional offset scaling (configurable ramp from 0 to max over scale_ramp_time)
@@ -80,9 +92,14 @@ fractional_teleoperation_controller:
     # Desired position is expressed as (x_des - x_ref), with slow drift of x_ref
 
     joystick_active_threshold: 0.01  # Joystick is considered "active" for ramp scaling when ||joystick_linear|| >= this value
+    joystick_timeout_sec: 0.2        # If no new teleop command arrives within timeout, input is treated as zero (0 disables)
+    linear_deadband: 0.01            # Per-axis deadband on linear joystick input before fractional integration
+    angular_deadband: 0.03           # Per-axis deadband on angular joystick input before fractional integration
+    kp_orient: 1.0                   # Proportional gain applied to orientation-error angular velocity command
+    kd_orient: 0.1                   # Derivative gain applied to orientation-error angular velocity command
     snap_reference_on_release: false          # Snap x_ref to current x_des when joystick transitions from active to zero    
 
-    use_reference_drift: true   # Enable slow drift of reference position towards current position to prevent long-term drift
+    use_reference_drift: false   # Enable slow drift of reference position towards current position to prevent long-term drift
     reference_drift_joystick_threshold: 0.025  # Drift only when ||joystick_linear|| >= this value
     reference_first_order_rate: 0.5          # Exponential blend rate (1/s), used only in "first_order" reference update mode
     reference_update_mode: "fractional"     # "first_order" or "fractional"
@@ -106,7 +123,7 @@ fractional_teleoperation_controller:
     # Robot interface configuration for explorer
     robot_type: "explorer_velocity"
     base_frame: "base_link"
-    tool_frame: "tool0"
+    tool_frame: "ft_frame"
     use_topic_output: true
     vel_cmd_output_topic: "/fractional_teleoperation_controller/velocity_command"
     command_names:

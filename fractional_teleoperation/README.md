@@ -10,16 +10,18 @@ Both implementations now share the same computation layer in:
 
 ## Overview
 
-The teleoperation law operates on a fractional **offset** Δx between the desired position and a slowly drifting reference position x_ref:
+The teleoperation law operates on a fractional **offset** Δx between the desired position and a slowly drifting reference position x_ref. The standalone node uses one fractional order, while the controller can tune linear and angular channels independently:
 
 ```
 ^C_0 D_t^alpha Δx(t) = K u(t)
+^C_0 D_t^alpha_linear Δx_linear(t) = K_linear u_linear(t)
+^C_0 D_t^alpha_angular Δx_angular(t) = K_angular u_angular(t)
 ```
 
 with:
 - `u(t)`: normalized joystick command (`extender_msgs/msg/TeleopCommand`)
 - `Δx(t) = x_des(t) − x_ref(t)`: offset between desired and reference position
-- `alpha`: fractional order, controlling memory depth and response smoothing
+- `alpha` / `linear_alpha` / `angular_alpha`: fractional order, controlling memory depth and response smoothing
 - `K`: gain
 
 The desired position is reconstructed as `x_des = x_ref + Δx`, and the commanded velocity is the time-derivative of Δx.
@@ -39,7 +41,7 @@ The shared core contains the common math and control post-processing used by bot
 - Input-frame transform (`base` / `ee`), mode filtering, velocity scaling
 - Adaptive gain computation (`dt`, `perceptual`, or `geometric_transition` mode)
 
-This keeps behavior consistent between the node and controller paths.
+The controller and node share the math primitives, though their public parameters differ where noted below.
 
 ## Fractional Update Used
 
@@ -56,7 +58,7 @@ where:
 
 ## Dynamic Alpha
 
-When `use_dynamic_alpha: true`:
+For the standalone node, when `use_dynamic_alpha: true`:
 
 ```
 lambda = ||u_linear||
@@ -68,9 +70,18 @@ else:                 alpha = alpha_min + (alpha_max - alpha_min) * (lambda - l_
 
 When `alpha` changes beyond a small threshold, coefficients are recomputed.
 
+For the controller, dynamic alpha is split by channel:
+
+```
+lambda_linear = ||u_linear||
+lambda_angular = ||u_angular||
+```
+
+`use_dynamic_alpha_linear` drives `linear_alpha` from `linear_alpha_min` to `linear_alpha_max` using `linear_l_0` and `linear_l_max`. `use_dynamic_alpha_angular` does the same for `angular_alpha` using the angular range parameters.
+
 ## Adaptive Gain
 
-For the node, `normalize_gain_for_alpha` enables gain adaptation:
+For the standalone node, `normalize_gain_for_alpha` enables gain adaptation:
 
 - `alpha_gain_normalization_mode: dt`
   - `K = v_max * dt^(1 - alpha)`
@@ -82,6 +93,8 @@ For the node, `normalize_gain_for_alpha` enables gain adaptation:
 
 (`Gamma(alpha)` uses a safe lower bound for very small `alpha`.)
 (`k_0` and `k_1` must stay strictly positive.)
+
+In the controller, gain adaptation is configured independently with `linear_normalize_gain_for_alpha` and `angular_normalize_gain_for_alpha`. Each channel has its own mode and normalization constants, producing `K_linear` and `K_angular`.
 
 ## Node Parameter Reference
 
@@ -260,10 +273,10 @@ The scale for each component follows a selected ramp profile from 0 to its maxim
 
 1. **Set `dt`** to match the actual timer frequency (e.g. `0.01` for 100 Hz).
 2. **Disable adaptive gain** (`normalize_gain_for_alpha: false`) and set `fractional_offset_gain` manually to get rough motion at moderate joystick deflection.
-3. **Tune `alpha`**: start at `1.0` (standard integrator), lower toward `0.5–0.8` for smoother, more persistent motion.
+3. **Tune `alpha`**: start at `1.0` (standard integrator), lower toward `0.5–0.8` for smoother, more persistent motion. In controller mode, tune `linear_alpha` and `angular_alpha` separately.
 4. **Enable adaptive gain** (`normalize_gain_for_alpha: true`, mode `"dt"`, `"perceptual"`, or `"geometric_transition"`) once the alpha range is settled, replacing manual `fractional_offset_gain` with `v_max` set to the desired maximum speed or `k_0`/`k_1` set to the desired transition endpoints.
 5. **Tune reference drift**: set `use_reference_drift: true`, mode `"first_order"`, and adjust `reference_first_order_rate` until the joystick return-to-centre timing feels natural.
-6. *(Optional)* Enable `use_dynamic_alpha` for variable-sensitivity control across the joystick range.
+6. *(Optional)* Enable dynamic alpha for variable-sensitivity control across the joystick range. In controller mode, use `use_dynamic_alpha_linear` and/or `use_dynamic_alpha_angular`.
 
 ### Symptom-to-parameter map
 
@@ -271,10 +284,10 @@ The scale for each component follows a selected ramp profile from 0 to its maxim
 |---|---|---|
 | Motion too slow / unresponsive | `fractional_offset_gain` or `v_max` too low | Increase `fractional_offset_gain` (or `v_max` if adaptive gain is on) |
 | Motion jerky / oscillatory | `fractional_offset_gain` too high, or `dt` mismatch | Lower `fractional_offset_gain`; verify `dt` matches the actual timer rate |
-| Motion feels sticky, slow to start | `alpha` too low | Increase `alpha` toward 1.0 |
+| Motion feels sticky, slow to start | `alpha` too low | Increase `alpha` toward 1.0; in controller mode, adjust `linear_alpha` or `angular_alpha` for the affected channel |
 | End-effector keeps drifting after joystick release | `reference_first_order_rate` too low | Increase `reference_first_order_rate` |
 | Joystick must be held to maintain position (springs back) | `reference_first_order_rate` too high | Decrease `reference_first_order_rate` |
-| Response overshoots on direction reversal | `alpha` above 1 | Lower `alpha` below 1.0 |
+| Response overshoots on direction reversal | `alpha` above 1 | Lower `alpha` below 1.0; in controller mode, adjust the affected channel |
 | GL approximation artifacts at low `alpha` | `memory_length` too short | Increase `memory_length` (≥ 2× settling time in samples) |
 | Velocity amplitude changes when `alpha` is modified | Adaptive gain disabled | Enable `normalize_gain_for_alpha: true` |
 
@@ -513,13 +526,35 @@ python3 src/controllers/fractional_teleoperation/scripts/visualize_fractional_te
 
 The `fractional_teleoperation_controller` is a `ros2_control` plugin sharing the same fractional core as the node. Parameters are declared in the controller manager YAML or the robot-specific config files (`config/franka_params.yaml`, `config/explorer_params.yaml`).
 
-### Shared parameters (same meaning and tuning as node)
+### Controller fractional parameters
 
-`alpha`, `fractional_offset_gain`, `memory_length`, `dt`, `output_velocity_scale`, `input_frame`, `use_dynamic_alpha`, `alpha_max`, `l_0`, `l_max`
+The controller uses separate fractional order state for linear and angular command channels. Configure both `linear_alpha` and `angular_alpha` explicitly in controller YAML.
 
-All tuning rules from the [Node Parameter Reference](#node-parameter-reference) apply directly.
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `linear_alpha` | float | `1.5` | Fractional order for the linear command path. |
+| `angular_alpha` | float | `1.5` | Fractional order for the angular command path. |
+| `linear_fractional_offset_gain` | float | `0.1` | Manual gain for the linear path when `linear_normalize_gain_for_alpha` is `false`. |
+| `angular_fractional_offset_gain` | float | `0.1` | Manual gain for the angular path when `angular_normalize_gain_for_alpha` is `false`. |
+| `linear_normalize_gain_for_alpha` | bool | `true` | Recompute linear gain from the current linear alpha. |
+| `angular_normalize_gain_for_alpha` | bool | `true` | Recompute angular gain from the current angular alpha. |
+| `linear_alpha_gain_normalization_mode` | string | `"dt"` | Formula for adaptive linear gain: `"dt"`, `"perceptual"`, or `"geometric_transition"`. |
+| `angular_alpha_gain_normalization_mode` | string | `"dt"` | Formula for adaptive angular gain: `"dt"`, `"perceptual"`, or `"geometric_transition"`. |
+| `linear_v_max` / `angular_v_max` | float | `1.0` / `1.0` | Channel-specific `v_max` values for `"dt"` and `"perceptual"` gain modes. |
+| `linear_t_ref` / `angular_t_ref` | float | `1.0` / `1.0` | Channel-specific reference times for `"perceptual"` gain mode. |
+| `linear_k_0` / `angular_k_0` | float | `1.0` / `1.0` | Channel-specific position-amplification endpoints for `"geometric_transition"`. |
+| `linear_k_1` / `angular_k_1` | float | `1.0` / `1.0` | Channel-specific velocity-gain endpoints for `"geometric_transition"`. |
+| `use_dynamic_alpha_linear` | bool | `false` | Enable dynamic alpha for the linear path using `||u_linear||`. |
+| `use_dynamic_alpha_angular` | bool | `false` | Enable dynamic alpha for the angular path using `||u_angular||`. |
+| `linear_alpha_min` / `linear_alpha_max` | float | `0.0` / `1.0` | Dynamic alpha range for the linear path. |
+| `angular_alpha_min` / `angular_alpha_max` | float | `0.0` / `1.0` | Dynamic alpha range for the angular path. |
+| `linear_l_0` / `linear_l_max` | float | `0.1` / `1.0` | Linear joystick norm range used to interpolate dynamic linear alpha. |
+| `angular_l_0` / `angular_l_max` | float | `0.1` / `1.0` | Angular joystick norm range used to interpolate dynamic angular alpha. |
+| `alpha_threshold` | float | `0.001` | Minimum alpha change before refreshing that channel's GL coefficients. |
 
-> The controller does **not** implement adaptive gain, reference drift, or the Δx offset subsystem. The fractional integration acts directly on the joystick input to produce a desired position; the commanded velocity is derived from that. When the joystick returns to zero, motion stops once the GL history decays.
+All other tuning rules from the [Node Parameter Reference](#node-parameter-reference) apply with the channel-specific alpha substituted for `alpha`.
+
+When dynamic alpha is enabled for one channel, only that channel's current alpha, GL coefficient cache, and adaptive gain are updated from that channel's joystick norm. The other channel can remain fixed, dynamic, or use a different dynamic range.
 
 ### Controller-specific parameters
 
@@ -535,6 +570,10 @@ All tuning rules from the [Node Parameter Reference](#node-parameter-reference) 
 
 - `global_linear_velocity_saturation` and `global_angular_velocity_saturation` are the hard safety caps; set them first.
 - `output_velocity_scale` is the coarse speed-tuning knob underneath those caps.
+- Tune `linear_alpha` and `angular_alpha` independently: start both at `1.0`, then lower the channel that should feel smoother or more persistent.
+- Tune `linear_fractional_offset_gain` and `angular_fractional_offset_gain` independently when adaptive normalization is disabled.
+- Use channel-specific gain-normalization parameters when translation and rotation need different speed ranges or geometric-transition endpoints.
+- Use `use_dynamic_alpha_linear` and `use_dynamic_alpha_angular` independently when translation and rotation need different low/high-deflection behavior.
 - `dt` must match the `ros2_control` update rate configured in the hardware interface or controller manager.
 - There is no reference drift: to stop motion the user must return the joystick to zero and wait for the GL history to decay (time ≈ `memory_length × dt` seconds).
 - For a full controller configuration example see `config/explorer_params.yaml` (Explorer + qontrol chain) or `config/franka_params.yaml`.

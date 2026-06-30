@@ -49,32 +49,31 @@ The node implementation uses a finite-memory GL recursion for real-time operatio
 in control and signal-processing implementations \cite{podlubny_1999,oustaloup_2000}.
 
 \section{Implemented Control Objective}
-Let $u_k \in \mathbb{R}^3$ be the sampled joystick input (linear and angular channels treated separately),
-$\Delta x_k$ the fractional offset, and $x_{\mathrm{ref},k}$ a drifting reference position.
-The implemented law is:
+Let $u_k \in \mathbb{R}^3$ be the sampled joystick input, with linear and angular channels treated separately.
+For channel $i \in \{\mathrm{lin},\mathrm{ang}\}$, the fractional offset $\Delta x^i_k$ follows:
 \begin{equation}
-{}^{C}_{0}D_t^{\alpha} \Delta x(t) = K\,u(t),
+{}^{C}_{0}D_t^{\alpha_i} \Delta x^i(t) = K_i\,u^i(t),
 \end{equation}
 with reconstructed desired state
 \begin{equation}
 x_{\mathrm{des},k} = x_{\mathrm{ref},k} + S_k\,\Delta x_k,
 \end{equation}
-where $S_k$ is a time-varying ramp scale (separate maxima for linear and angular channels).
+where $S_k$ is a time-varying ramp scale with separate maxima for linear and angular channels.
 The published velocity command is computed from the scaled offset derivative:
 \begin{equation}
 v_k = \frac{S_k\Delta x_k - S_{k-1}\Delta x_{k-1}}{\Delta t}.
 \end{equation}
 
 \section{Discrete Fractional Recursion (GL Approximation)}
-For memory length $L$ and sample time $\Delta t$, coefficients are generated recursively as:
+For memory length $L$ and sample time $\Delta t$, each channel generates its own coefficients recursively as:
 \begin{equation}
-c_0 = 1, \qquad
-c_k = c_{k-1}\frac{k-1-\alpha}{k}, \quad k \ge 1.
+c^i_0 = 1, \qquad
+c^i_k = c^i_{k-1}\frac{k-1-\alpha_i}{k}, \quad k \ge 1.
 \end{equation}
 
-The node update uses:
+The update uses:
 \begin{equation}
-\Delta x_k = (\Delta t)^{\alpha}K u_k - \sum_{j=1}^{L'} c_j \Delta x_{k-j},
+\Delta x^i_k = (\Delta t)^{\alpha_i}K_i u^i_k - \sum_{j=1}^{L'} c^i_j \Delta x^i_{k-j},
 \end{equation}
 where $L' = \min(L,\text{available history})$. This is applied independently to linear and angular vectors.
 
@@ -83,17 +82,22 @@ The GL operator is truncated to $L$ samples; therefore the implementation is an 
 fractional dynamics. Increasing $L$ improves fidelity at increased computational cost.
 
 \section{Dynamic Fractional Order \texorpdfstring{$\alpha$}{alpha}}
-When enabled, $\alpha$ is adapted from joystick norm $\lambda = \lVert u_{\text{linear}} \rVert$:
+The controller has independent dynamic-alpha switches for linear and angular channels.
+When enabled for channel $i$, $\alpha_i$ is adapted from that channel's joystick norm:
 \begin{equation}
-\alpha(\lambda)=
+\lambda_{\mathrm{lin}} = \lVert u_{\mathrm{lin}} \rVert,\qquad
+\lambda_{\mathrm{ang}} = \lVert u_{\mathrm{ang}} \rVert.
+\end{equation}
+\begin{equation}
+\alpha_i(\lambda_i)=
 \begin{cases}
-\alpha_{\min}, & \lambda < l_0,\\
-\alpha_{\max}, & \lambda > l_{\max},\\
-\alpha_{\min} + (\alpha_{\max}-\alpha_{\min})\dfrac{\lambda-l_0}{l_{\max}-l_0}, & \text{otherwise}.
+\alpha^i_{\min}, & \lambda_i < l^i_0,\\
+\alpha^i_{\max}, & \lambda_i > l^i_{\max},\\
+\alpha^i_{\min} + (\alpha^i_{\max}-\alpha^i_{\min})\dfrac{\lambda_i-l^i_0}{l^i_{\max}-l^i_0}, & \text{otherwise}.
 \end{cases}
 \end{equation}
 
-When $|\alpha_{\text{new}}-\alpha_{\text{last}}| > 10^{-3}$, GL coefficients are recomputed.
+When $|\alpha^i_{\text{new}}-\alpha^i_{\text{last}}|$ exceeds the configured threshold, that channel's GL coefficients are recomputed.
 
 \paragraph{Implementation caveat (variable order).}
 The history buffers are not reprojected when $\alpha$ changes; only coefficients are refreshed.
@@ -101,12 +105,15 @@ This is an engineering approximation for real-time operation and should be inter
 for strict variable-order fractional analysis.
 
 \section{Gain Normalization Across Fractional Orders}
-If normalization is enabled, $K$ is recomputed each cycle using one of two modes:
+Each channel has an independent manual gain and normalization flag. If normalization is enabled for channel $i$,
+that channel recomputes $K_i$ from its current $\alpha_i$ using its own parameters:
 \begin{align}
-\texttt{dt mode:} \quad & K = v_{\max}(\Delta t)^{1-\alpha}, \\
-\texttt{perceptual mode:} \quad & K = v_{\max}\,\frac{\Gamma(\alpha)}{t_{\mathrm{ref}}^{\alpha-1}}.
+\texttt{dt mode:} \quad & K_i = v_{\max,i}(\Delta t)^{1-\alpha_i}, \\
+\texttt{perceptual mode:} \quad & K_i = v_{\max,i}\,\frac{\Gamma(\alpha_i)}{t_{\mathrm{ref},i}^{\alpha_i-1}},\\
+\texttt{geometric transition mode:} \quad & K_i = k_{0,i}^{1-\alpha_i}k_{1,i}^{\alpha_i}.
 \end{align}
-For numerical safety in perceptual mode, a lower bound is used before evaluating $\Gamma(\alpha)$.
+If normalization is disabled for a channel, its configured manual gain is used directly.
+For numerical safety in perceptual mode, a lower bound is used before evaluating $\Gamma(\alpha_i)$.
 
 \section{Offset Ramp Scaling}
 Joystick activity is detected by $\lVert u_{\text{linear}}\rVert > \tau_{\text{active}}$.
@@ -164,12 +171,12 @@ x_{\mathrm{ref},k} &\leftarrow x_{\mathrm{ref},k} + S_{k-1}\Delta x_{k^-},\\
 for both linear and angular channels.
 This makes joystick release recenter the fractional state around the current desired position.
 
-\section{Algorithmic Form (Node Update Loop)}
+\section{Algorithmic Form (Controller Update Loop)}
 At each timer tick:
 \begin{enumerate}[leftmargin=*]
 \item Read latest joystick linear/angular vectors and operation mode.
-\item Update dynamic $\alpha$ (if enabled); refresh GL coefficients if threshold exceeded.
-\item Update gain $K$ (if adaptive gain normalization enabled).
+\item Update dynamic $\alpha_{\mathrm{lin}}$ and/or $\alpha_{\mathrm{ang}}$ if enabled; refresh the affected GL coefficients if threshold exceeded.
+\item Update $K_{\mathrm{lin}}$ and/or $K_{\mathrm{ang}}$ if that channel's adaptive gain normalization is enabled.
 \item Save previous scaled offsets for derivative computation.
 \item Apply GL fractional integration to linear and angular channels to update $\Delta x_k$.
 \item Update ramp timer from activity condition and compute profile-based scales.
@@ -190,14 +197,14 @@ The active YAML in this workspace uses the following key values:
 \toprule
 Parameter & Value \\
 \midrule
-$\alpha$ & 0.5 \\
-$K$ (manual, no normalization) & 1.0 \\
+$\alpha_{\mathrm{lin}}, \alpha_{\mathrm{ang}}$ & 1.0, 1.0 \\
+$K_{\mathrm{lin}}, K_{\mathrm{ang}}$ & adaptive normalization enabled for both channels, geometric transition mode with $k_{0,\mathrm{lin}}=k_{0,\mathrm{ang}}=0.4$, $k_{1,\mathrm{lin}}=k_{1,\mathrm{ang}}=0.1$ \\
 $L$ (memory length) & 50 \\
-$\Delta t$ & 0.01 s \\
-Dynamic alpha & enabled, $\alpha_{\min}=0.1$, $\alpha_{\max}=1.0$, $l_0=0.5$, $l_{\max}=1.0$ \\
+$\Delta t$ & 0.01 s at 100 Hz controller update rate \\
+Dynamic alpha & disabled for linear and angular; configured ranges are $\alpha_{\min}=0.1$, $\alpha_{\max}=1.0$, $l_0=0.6$, $l_{\max}=1.0$ for both channels \\
 Ramp scaling & enabled via $S^{\text{lin}}_{\max}=2.0$, $S^{\text{ang}}_{\max}=1.0$, $T_{\text{ramp}}=2.5$ s, profile exponential \\
-Snap on release & enabled \\
-Reference drift & enabled, threshold $\tau_{\text{drift}}=0.5$, mode fractional, $\alpha_r=0.5$, $K_r=0.5$ \\
+Snap on release & disabled \\
+Reference drift & disabled in the active controller configuration; fractional reference parameters remain configured for optional use \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -245,9 +252,9 @@ These results are implementation-faithful computational checks, not formal globa
 \end{itemize}
 
 \section{Scope Boundary}
-This document targets the standalone node implementation only.
-The ROS 2 controller plugin in the same package shares core fractional routines but does not include all node-specific
-behavioral blocks (notably the same drift/snap/ramp orchestration).
+This document targets the runtime fractional teleoperation implementation and current controller configuration.
+The standalone node still exposes the legacy single-\(\alpha\) parameter set, while the ROS 2 controller plugin supports
+separate linear and angular fractional orders and dynamic-alpha switches.
 
 \begin{thebibliography}{99}
 
