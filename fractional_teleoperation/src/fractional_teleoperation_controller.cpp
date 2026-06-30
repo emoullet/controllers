@@ -240,6 +240,24 @@ void FractionalTeleoperationController::declareParameters()
 			"global_linear_velocity_saturation", global_linear_velocity_saturation_, 0.0);
 	declare_and_get_parameters(
 			"global_angular_velocity_saturation", global_angular_velocity_saturation_, 0.0);
+	declare_and_get_parameters(
+			"enable_linear_one_euro_filter", enable_linear_one_euro_filter_, false);
+	declare_and_get_parameters(
+			"linear_one_euro_frequency",
+			linear_one_euro_frequency_,
+			static_cast<double>(update_rate_));
+	declare_and_get_parameters("linear_one_euro_mincutoff", linear_one_euro_mincutoff_, 1.0);
+	declare_and_get_parameters("linear_one_euro_beta", linear_one_euro_beta_, 0.1);
+	declare_and_get_parameters("linear_one_euro_dcutoff", linear_one_euro_dcutoff_, 1.0);
+	declare_and_get_parameters(
+			"enable_angular_one_euro_filter", enable_angular_one_euro_filter_, false);
+	declare_and_get_parameters(
+			"angular_one_euro_frequency",
+			angular_one_euro_frequency_,
+			static_cast<double>(update_rate_));
+	declare_and_get_parameters("angular_one_euro_mincutoff", angular_one_euro_mincutoff_, 1.0);
+	declare_and_get_parameters("angular_one_euro_beta", angular_one_euro_beta_, 0.1);
+	declare_and_get_parameters("angular_one_euro_dcutoff", angular_one_euro_dcutoff_, 1.0);
 	declare_and_get_parameters("input_frame", input_frame_, std::string("base"));
 
 	declare_and_get_parameters("linear_normalize_gain_for_alpha", linear_normalize_gain_for_alpha_, true);
@@ -563,6 +581,64 @@ void FractionalTeleoperationController::validateAndNormalizeParameters()
 		global_angular_velocity_saturation_ = 0.0;
 	}
 
+	const auto validate_one_euro_parameters =
+			[this](
+					const char * label,
+					double & frequency,
+					double & mincutoff,
+					double & beta,
+					double & dcutoff)
+	{
+		if (!std::isfinite(frequency) || frequency < 1e-3)
+		{
+			RCLCPP_WARN(
+					get_node()->get_logger(),
+					"Invalid %s_one_euro_frequency=%.6f. Clamping to 1e-3.",
+					label,
+					frequency);
+			frequency = 1e-3;
+		}
+		if (!std::isfinite(mincutoff) || mincutoff < 1e-6)
+		{
+			RCLCPP_WARN(
+					get_node()->get_logger(),
+					"Invalid %s_one_euro_mincutoff=%.6f. Clamping to 1e-6.",
+					label,
+					mincutoff);
+			mincutoff = 1e-6;
+		}
+		if (!std::isfinite(beta) || beta < 0.0)
+		{
+			RCLCPP_WARN(
+					get_node()->get_logger(),
+					"Invalid %s_one_euro_beta=%.6f. Clamping to 0.0.",
+					label,
+					beta);
+			beta = 0.0;
+		}
+		if (!std::isfinite(dcutoff) || dcutoff < 1e-6)
+		{
+			RCLCPP_WARN(
+					get_node()->get_logger(),
+					"Invalid %s_one_euro_dcutoff=%.6f. Clamping to 1e-6.",
+					label,
+					dcutoff);
+			dcutoff = 1e-6;
+		}
+	};
+	validate_one_euro_parameters(
+			"linear",
+			linear_one_euro_frequency_,
+			linear_one_euro_mincutoff_,
+			linear_one_euro_beta_,
+			linear_one_euro_dcutoff_);
+	validate_one_euro_parameters(
+			"angular",
+			angular_one_euro_frequency_,
+			angular_one_euro_mincutoff_,
+			angular_one_euro_beta_,
+			angular_one_euro_dcutoff_);
+
 	if (fractional_offset_linear_scale_max_ < 0.0)
 	{
 		fractional_offset_linear_scale_max_ = 0.0;
@@ -602,6 +678,19 @@ void FractionalTeleoperationController::resetControllerState()
 			fractional_teleoperation::core::computeGrunwaldCoefficients(memory_length_, current_angular_alpha_);
 	reference_gl_coefficients_ = fractional_teleoperation::core::computeGrunwaldCoefficients(
 			memory_length_, reference_alpha_);
+
+	linear_velocity_filter_ = signal_processing::OneEuroFilter3d(
+			linear_one_euro_frequency_,
+			linear_one_euro_mincutoff_,
+			linear_one_euro_beta_,
+			linear_one_euro_dcutoff_);
+	angular_velocity_filter_ = signal_processing::OneEuroFilter3d(
+			angular_one_euro_frequency_,
+			angular_one_euro_mincutoff_,
+			angular_one_euro_beta_,
+			angular_one_euro_dcutoff_);
+	linear_velocity_filter_.reset();
+	angular_velocity_filter_.reset();
 
 	latest_joystick_ = geometry_msgs::msg::Twist();
 	mode_ = extender_msgs::msg::TeleopCommand::BOTH;
@@ -1048,6 +1137,31 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> FractionalTeleoperationController::u
 
 }
 
+robot_interfaces::CartesianVelocity FractionalTeleoperationController::filterVelocityCommand(
+		const robot_interfaces::CartesianVelocity &raw_vel_cmd,
+		double timestamp_sec)
+{
+	Eigen::Vector3d linear_velocity(
+			raw_vel_cmd.linear[0],
+			raw_vel_cmd.linear[1],
+			raw_vel_cmd.linear[2]);
+	Eigen::Vector3d angular_velocity(
+			raw_vel_cmd.angular[0],
+			raw_vel_cmd.angular[1],
+			raw_vel_cmd.angular[2]);
+
+	if (enable_linear_one_euro_filter_)
+	{
+		linear_velocity = linear_velocity_filter_.filter(linear_velocity, timestamp_sec);
+	}
+	if (enable_angular_one_euro_filter_)
+	{
+		angular_velocity = angular_velocity_filter_.filter(angular_velocity, timestamp_sec);
+	}
+
+	return toCartesianVelocity(linear_velocity, angular_velocity);
+}
+
 controller_interface::return_type FractionalTeleoperationController::publishVelocityCommand(
 		const robot_interfaces::CartesianVelocity &latest_vel_cmd)
 {
@@ -1133,6 +1247,8 @@ CallbackReturn FractionalTeleoperationController::on_activate(const rclcpp_lifec
 	reference_orientation_ = normalizedQuaternion(rotationVectorToQuaternion(desired_orientation_vec));
 	// reference_orientation_ = current_orientation_;
 	reference_position_angular_.setZero();
+	linear_velocity_filter_.reset();
+	angular_velocity_filter_.reset();
 
     RCLCPP_INFO(
             get_node()->get_logger(),
@@ -1309,7 +1425,7 @@ void FractionalTeleoperationController::publishEePoseTranslationMarker(
 
 
 controller_interface::return_type FractionalTeleoperationController::update(
-		const rclcpp::Time & /*time*/,
+		const rclcpp::Time & time,
 		const rclcpp::Duration & period)
 {
 	if (!robot_vel_interface_)
@@ -1483,8 +1599,10 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	cartesian_linear_velocity -= reference_linear_velocity;
 	// cartesian_angular_velocity -= reference_angular_velocity;
 
-	const robot_interfaces::CartesianVelocity latest_vel_cmd =
+	const robot_interfaces::CartesianVelocity raw_vel_cmd =
 			toCartesianVelocity(cartesian_linear_velocity, cartesian_angular_velocity);
+	const robot_interfaces::CartesianVelocity latest_vel_cmd =
+			filterVelocityCommand(raw_vel_cmd, time.seconds());
 
 	RCLCPP_DEBUG(get_node()->get_logger(),
 		"latest_vel_cmd - linear: [%.6f, %.6f, %.6f], angular: [%.6f, %.6f, %.6f]",

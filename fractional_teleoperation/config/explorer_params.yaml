@@ -56,6 +56,19 @@ fractional_teleoperation_controller:
     output_velocity_scale: 1.0    # Overall output velocity scaling factor
     global_linear_velocity_saturation: 1.0   # Hard cap on ||linear velocity|| in m/s after transform/scale; 0 disables
     global_angular_velocity_saturation: 1.0  # Hard cap on ||angular velocity|| in rad/s after transform/scale; 0 disables
+
+    # Output velocity One Euro filtering
+    enable_linear_one_euro_filter: true
+    linear_one_euro_frequency: 100.0
+    linear_one_euro_mincutoff: 1.0
+    linear_one_euro_beta: 0.1
+    linear_one_euro_dcutoff: 1.0
+    enable_angular_one_euro_filter: true
+    angular_one_euro_frequency: 100.0
+    angular_one_euro_mincutoff: 1.0
+    angular_one_euro_beta: 0.1
+    angular_one_euro_dcutoff: 1.0
+
     input_frame: "base"           # Reference frame: "base" or "ee"
     linear_normalize_gain_for_alpha: true   # Normalize linear K across alpha
     angular_normalize_gain_for_alpha: true  # Normalize angular K across alpha
@@ -65,9 +78,9 @@ fractional_teleoperation_controller:
     angular_v_max: 1.0            # Max velocity used for adaptive angular K
     linear_t_ref: 0.2             # Reference time for linear perceptual gain mode (s)
     angular_t_ref: 0.2            # Reference time for angular perceptual gain mode (s)
-    linear_k_0: 0.4               # Linear position-amplification endpoint used by geometric_transition
+    linear_k_0: 0.              # Linear position-amplification endpoint used by geometric_transition
     angular_k_0: 0.2              # Angular position-amplification endpoint used by geometric_transition
-    linear_k_1: 0.1               # Linear velocity-gain endpoint used by geometric_transition
+    linear_k_1: 0.               # Linear velocity-gain endpoint used by geometric_transition
     angular_k_1: 0.2              # Angular velocity-gain endpoint used by geometric_transition
     
     # Dynamic alpha parameters
