@@ -5,6 +5,17 @@
 
 namespace fractional_teleoperation::core
 {
+
+Eigen::Vector3d roundVectorToPrecision(const Eigen::Vector3d &vector, double precision)
+{
+  Eigen::Vector3d rounded_vector;
+  for (int i = 0; i < 3; ++i)
+  {
+    rounded_vector[i] = std::round(vector[i] / precision) * precision;
+  }
+  return rounded_vector;
+}
+
 std::vector<double> computeGrunwaldCoefficients(int memory_length, double alpha)
 {
   std::vector<double> gl_coefficients;
@@ -67,10 +78,33 @@ Eigen::Vector3d applyFractionalIntegration(
 
 Eigen::Vector3d computeVelocityFromDesiredPosition(
     const Eigen::Vector3d & desired_position,
-    const Eigen::Vector3d & previous_desired_position,
+    const Eigen::Vector3d & current_position,
+    const Eigen::Vector3d & current_linear_velocity,
+    double Kp,
+    double Kd,
     double dt)
 {
-  return (desired_position - previous_desired_position) / dt;
+  if (dt <= 1e-12)
+  {
+    return Eigen::Vector3d::Zero();
+  }
+
+  const Eigen::Vector3d position_error = desired_position - current_position;
+  const Eigen::Vector3d desired_linear_velocity = 0.0* position_error / dt;
+  return Kp * position_error + Kd * (desired_linear_velocity - current_linear_velocity);
+}
+
+Eigen::Vector3d computeFiniteDifferenceVelocity(
+    const Eigen::Vector3d & current_position,
+    const Eigen::Vector3d & previous_position,
+    double dt)
+{
+  if (dt <= 1e-12)
+  {
+    return Eigen::Vector3d::Zero();
+  }
+
+  return (current_position - previous_position) / dt;
 }
 
 Eigen::Vector3d updateReferencePosition(

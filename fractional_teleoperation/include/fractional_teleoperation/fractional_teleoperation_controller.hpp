@@ -222,6 +222,7 @@ namespace fractional_teleoperation_controller
     Eigen::Quaterniond current_orientation_;
     Eigen::Quaterniond reference_orientation_;
     Eigen::Vector3d current_position_;
+    Eigen::Vector3d current_linear_velocity_;
     Eigen::Vector3d current_angular_velocity_;
     
     /// Current alpha values (may be dynamic)
@@ -277,6 +278,8 @@ namespace fractional_teleoperation_controller
     double linear_deadband_{0.01};
     double angular_deadband_{0.03};
     double k_orient_{4.0};
+    double kp_linear_{1.0};
+    double kd_linear_{0.1};
     double kp_orient_{1.0};
     double kd_orient_{0.1};
     bool snap_reference_on_release_{false};

@@ -717,18 +717,18 @@ namespace fractional_teleoperation_node
     Eigen::Vector3d reference_angular_velocity = Eigen::Vector3d::Zero();
     if (use_reference_drift_)
     {
-      reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+      reference_linear_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
         reference_position_linear_, previous_reference_position_linear, dt_);
-      reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+      reference_angular_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
         reference_position_angular_, previous_reference_position_angular, dt_);
     }
 
     // Compute Cartesian velocities from scaled fractional offset: d(scale*Δx)/dt
     Eigen::Vector3d cartesian_linear_velocity =
-      fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+      fractional_teleoperation::core::computeFiniteDifferenceVelocity(
         scaled_offset_linear, previous_scaled_offset_linear, dt_);
     Eigen::Vector3d cartesian_angular_velocity =
-      fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+      fractional_teleoperation::core::computeFiniteDifferenceVelocity(
         scaled_offset_angular, previous_scaled_offset_angular, dt_);
 
     // Compensate for reference drift in the commanded Cartesian velocity.

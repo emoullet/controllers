@@ -15,6 +15,8 @@ def generate_launch_description():
     # --------------------------------------------------------------------------
     gui = LaunchConfiguration("gui")
     use_simulation = LaunchConfiguration("use_simulation")
+    render_engine = LaunchConfiguration("render_engine")
+    software_rendering = LaunchConfiguration("software_rendering")
 
     use_actuator_interface = PythonExpression([
             "'false' if '", use_simulation, "' == 'true' else 'true'"
@@ -50,6 +52,16 @@ def generate_launch_description():
             default_value='info',
             description='Log level for the fractional teleoperation node (debug, info, warn, error)'
         ),
+        DeclareLaunchArgument(
+            'render_engine',
+            default_value='ogre',
+            description='Gazebo render engine to use in simulation (ogre or ogre2)'
+        ),
+        DeclareLaunchArgument(
+            'software_rendering',
+            default_value='true',
+            description='Force software OpenGL rendering for Gazebo in simulation'
+        ),
     ]
 
     # --------------------------------------------------------------------------
@@ -68,7 +80,9 @@ def generate_launch_description():
             'use_sim_time': use_simulation,
             'rviz_delay': '3.0',
             'extra_controllers_config': velocity_config, 
-            'use_custom_controllers': "true"
+            'use_custom_controllers': "true",
+            'render_engine': render_engine,
+            'software_rendering': software_rendering,
         }.items(),
         condition=IfCondition(use_simulation)
     )

@@ -287,6 +287,8 @@ void FractionalTeleoperationController::declareParameters()
 	declare_and_get_parameters("joystick_timeout_sec", joystick_timeout_sec_, 0.2);
 	declare_and_get_parameters("linear_deadband", linear_deadband_, 0.01);
 	declare_and_get_parameters("angular_deadband", angular_deadband_, 0.03);
+	declare_and_get_parameters("kp_linear", kp_linear_, 1.0);
+	declare_and_get_parameters("kd_linear", kd_linear_, 0.1);
 	declare_and_get_parameters("kp_orient", kp_orient_, 1.0);
 	declare_and_get_parameters("kd_orient", kd_orient_, 0.1);
 	declare_and_get_parameters("snap_reference_on_release", snap_reference_on_release_, false);
@@ -506,22 +508,23 @@ void FractionalTeleoperationController::validateAndNormalizeParameters()
 	clamp_deadband("angular_deadband", angular_deadband_);
 
 
-	if (kp_orient_ < 0.0 || kp_orient_ > 10.0)
+	const auto clamp_pd_gain =
+			[this](const char * parameter_name, double & gain)
 	{
-		RCLCPP_WARN(
-				get_node()->get_logger(),
-				"Invalid kp_orient=%.3f. Clamping to [0.0, 10.0].",
-				kp_orient_);
-		kp_orient_ = std::clamp(kp_orient_, 0.0, 10.0);
-	}
-	if (kd_orient_ < 0.0 || kd_orient_ > 10.0)
-	{
-		RCLCPP_WARN(
-				get_node()->get_logger(),
-				"Invalid kd_orient=%.3f. Clamping to [0.0, 10.0].",
-				kd_orient_);
-		kd_orient_ = std::clamp(kd_orient_, 0.0, 10.0);
-	}
+		if (gain < 0.0 || gain > 10.0)
+		{
+			RCLCPP_WARN(
+					get_node()->get_logger(),
+					"Invalid %s=%.3f. Clamping to [0.0, 10.0].",
+					parameter_name,
+					gain);
+			gain = std::clamp(gain, 0.0, 10.0);
+		}
+	};
+	clamp_pd_gain("kp_linear", kp_linear_);
+	clamp_pd_gain("kd_linear", kd_linear_);
+	clamp_pd_gain("kp_orient", kp_orient_);
+	clamp_pd_gain("kd_orient", kd_orient_);
 
 	const auto normalize_dynamic_alpha_range =
 			[this](const char * label, double & alpha_min, double & alpha_max, double & l_0, double & l_max)
@@ -698,6 +701,9 @@ void FractionalTeleoperationController::resetControllerState()
 	desired_offset_angular_.setZero();
 	reference_position_linear_.setZero();
 	reference_position_angular_.setZero();
+	current_position_.setZero();
+	current_linear_velocity_.setZero();
+	current_angular_velocity_.setZero();
 	current_orientation_ = Eigen::Quaterniond::Identity();
 	reference_orientation_ = Eigen::Quaterniond::Identity();
 	linear_history_.clear();
@@ -1062,11 +1068,11 @@ void FractionalTeleoperationController::computeReferenceDriftVelocity(
 		return;
 	}
 
-	reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+	reference_linear_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
 			reference_position_linear_,
 			previous_reference_position_linear,
 			dt_);
-	reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+	reference_angular_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
 			reference_position_angular_,
 			previous_reference_position_angular,
 			dt_);
@@ -1124,11 +1130,11 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> FractionalTeleoperationController::u
 		RCLCPP_ERROR(get_node()->get_logger(), "Invalid reference_update_mode '%s'.", reference_update_mode_.c_str());
 		return std::make_pair(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 	}
-	reference_linear_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+	reference_linear_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
 			reference_position_linear_,
 			previous_reference_position_linear,
 			dt_);
-	reference_angular_velocity = fractional_teleoperation::core::computeVelocityFromDesiredPosition(
+	reference_angular_velocity = fractional_teleoperation::core::computeFiniteDifferenceVelocity(
 			reference_position_angular_,
 			previous_reference_position_angular,
 			dt_);
@@ -1441,6 +1447,10 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	current_orientation_ = normalizedQuaternion(ee_pose.quaternion);
 
 	const robot_interfaces::CartesianVelocity current_velocity = robot_vel_interface_->getCurrentCartesianVelocity();
+	current_linear_velocity_ = Eigen::Vector3d(
+		current_velocity.linear[0],
+		current_velocity.linear[1],
+		current_velocity.linear[2]);
 	current_angular_velocity_ = Eigen::Vector3d(
 		current_velocity.angular[0],
 		current_velocity.angular[1],
@@ -1537,6 +1547,10 @@ controller_interface::return_type FractionalTeleoperationController::update(
 	Eigen::Vector3d desired_linear = reference_position_linear_ + desired_offset_linear_;
 	Eigen::Vector3d desired_angular = reference_position_angular_ + desired_offset_angular_;
 
+	// round desired positions to avoid numerical drift
+	// desired_linear = fractional_teleoperation::core::roundVectorToPrecision(desired_linear, 1e-4);
+	// desired_angular = fractional_teleoperation::core::roundVectorToPrecision(desired_angular, 1e-4);
+
 	// // applySnapOnRelease(
 	// // 		joystick_active,
 	// // 		pre_update_offset_linear,
@@ -1560,6 +1574,9 @@ controller_interface::return_type FractionalTeleoperationController::update(
 			fractional_teleoperation::core::computeVelocityFromDesiredPosition(
 					desired_linear,
 					current_position_,
+					current_linear_velocity_,
+					kp_linear_,
+					kd_linear_,
 					period.seconds());
 
 	RCLCPP_INFO(get_node()->get_logger(),
@@ -1603,6 +1620,7 @@ controller_interface::return_type FractionalTeleoperationController::update(
 			toCartesianVelocity(cartesian_linear_velocity, cartesian_angular_velocity);
 	const robot_interfaces::CartesianVelocity latest_vel_cmd =
 			filterVelocityCommand(raw_vel_cmd, time.seconds());
+			// raw_vel_cmd;
 
 	RCLCPP_DEBUG(get_node()->get_logger(),
 		"latest_vel_cmd - linear: [%.6f, %.6f, %.6f], angular: [%.6f, %.6f, %.6f]",

@@ -9,6 +9,8 @@
 
 namespace fractional_teleoperation::core
 {
+Eigen::Vector3d roundVectorToPrecision(const Eigen::Vector3d &vector, double precision);
+
 std::vector<double> computeGrunwaldCoefficients(int memory_length, double alpha);
 
 double computeDynamicAlpha(double lambda, double l_0, double l_max, double alpha_min, double alpha_max);
@@ -24,7 +26,15 @@ Eigen::Vector3d applyFractionalIntegration(
 
 Eigen::Vector3d computeVelocityFromDesiredPosition(
     const Eigen::Vector3d & desired_position,
-    const Eigen::Vector3d & previous_desired_position,
+    const Eigen::Vector3d & current_position,
+    const Eigen::Vector3d & current_linear_velocity,
+    double Kp,
+    double Kd,
+    double dt);
+
+Eigen::Vector3d computeFiniteDifferenceVelocity(
+    const Eigen::Vector3d & current_position,
+    const Eigen::Vector3d & previous_position,
     double dt);
 
 Eigen::Vector3d updateReferencePosition(
